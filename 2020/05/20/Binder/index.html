@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+
+
+<html lang="en">
+
+
+<head>
+  <meta charset="utf-8" />
+    
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>
+    Binder |  hansnowqiang
+  </title>
+  <meta name="generator" content="hexo-theme-ayer">
+  
+  <link rel="shortcut icon" href="/favicon.ico" />
+  
+  
+<link rel="stylesheet" href="/dist/main.css">
+
+  
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Shen-Yu/cdn/css/remixicon.min.css">
+
+  
+<link rel="stylesheet" href="/css/custom.css">
+
+  
+  
+<script src="https://cdn.jsdelivr.net/npm/pace-js@1.0.2/pace.min.js"></script>
+
+  
+  
+
+  
+
+</head>
+
+</html>
+
+<body>
+  <div id="app">
+    <main class="content on">
+      <section class="outer">
+  <article id="post-Binder" class="article article-type-post" itemscope
+  itemprop="blogPost" data-scroll-reveal>
+
+  <div class="article-inner">
+    
+    <header class="article-header">
+       
+<h1 class="article-title sea-center" style="border-left:0" itemprop="name">
+  Binder
+</h1>
+ 
+
+    </header>
+    
+
+    
+    <div class="article-meta">
+      <a href="/2020/05/20/Binder/" class="article-date">
+  <time datetime="2020-05-20T06:01:35.644Z" itemprop="datePublished">2020-05-20</time>
+</a>
+      
+      
+      
+<div class="word_count">
+    <span class="post-time">
+        <span class="post-meta-item-icon">
+            <i class="ri-quill-pen-line"></i>
+            <span class="post-meta-item-text"> Word count:</span>
+            <span class="post-count">8.3k</span>
+        </span>
+    </span>
+
+    <span class="post-time">
+        &nbsp; | &nbsp;
+        <span class="post-meta-item-icon">
+            <i class="ri-book-open-line"></i>
+            <span class="post-meta-item-text"> Reading time≈</span>
+            <span class="post-count">38 min</span>
+        </span>
+    </span>
+</div>
+
+      
+    </div>
+    
+
+    
+    
+    <div class="tocbot"></div>
+
+
+
+
+
+    
+
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+      
+
+      
+      <h1 id="Binder"><a href="#Binder" class="headerlink" title="Binder"></a>Binder</h1><h2 id="Binder驱动"><a href="#Binder驱动" class="headerlink" title="Binder驱动"></a>Binder驱动</h2><p>binder驱动会将自己注册为一个misc device，并向上层提供一个/dev/binder节点，binder节点并不对应真正的硬件设备，Binder驱动运行在内核态，提供了open(),ioctl(),mmap()等常用的对文件的操作</p>
+<p>binder_init()，注册misc device， 创建/dev/binder设备节点</p>
+<p>binder_open(), 获取Binder Driver的你文件描述符</p>
+<p>binder_mmap(), 在内核分配一块内存，用于存储数据 （128*1024byte）</p>
+<p>binder_ioctl()，将IPC参数作为参数传递给Binder Driver，函数负责在两个进程间收发IPC数据和IPC reply数据</p>
+<h3 id="open"><a href="#open" class="headerlink" title="open"></a>open</h3><p>上层进程在访问Binder驱动时首先要做的就是打开/dev/binder设备节点。Binder驱动会在/proc系统目录生成各种管理信息，最终生成binder_proc作为管理数据的记录体（每个进程都有独立的记录），并对其进行初始化。之后用户的所有对Binder驱动的操作都将以binder_proc这个对象为基础</p>
+<h3 id="mmap"><a href="#mmap" class="headerlink" title="mmap"></a>mmap</h3><p>可以将设备指定的内存块直接映射到应用程序的内存空间中</p>
+<p>假设有两个进程A，B，他们要通过binder进行进程间通信</p>
+<p><img src="/binder_1.jpg" alt="binder_1"></p>
+<p> 1、应用程序通过mmap函数返回得到一个内存地址（虚拟内存），这个地址通过虚拟内存转换（分页，分段）后最终将指向物力内存中的某个位置</p>
+<p>2、binder驱动，它也会有一个指针（binder_proc-&gt;buffer）指向某个虚拟内存地址，通过虚拟内存转换后，它和应用程序中指向的物力内存处于同一个位置</p>
+<p>这样Binder和应用程序之间就拥有了公用的内存块，这样当他们造作各自的内存地址时就相当于是在同意个内存块中执行的</p>
+<p>这样当Binder通过copy_from_user把进程A中的某段数据复制到其binder_proc-&gt;buffer所指向的内存空间中，应为binder_proc-&gt;buffer和B进程的内存区块是共享，这样B进程就可以直接访问到这段数据。即一次拷贝就完成了A，B进程间的数据共享</p>
+<p>Binder驱动默认映射区块大小为<strong><em>128KB</em></strong>，最多只支持<strong><em>4MB</em></strong>空间的mmap操作，超过4MB时也只分配4MB</p>
+<h3 id="ioctl"><a href="#ioctl" class="headerlink" title="ioctl"></a>ioctl</h3><p>这是Binder中接口函数中工作量最大的一个，它承载了主要的工作。</p>
+<table>
+<thead>
+<tr>
+<th align="left">ioctl命令</th>
+<th align="left">数据类型</th>
+<th align="left">操作</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left"><strong>BINDER_WRITE_READ</strong></td>
+<td align="left">struct binder_write_read</td>
+<td align="left">收发Binder IPC数据</td>
+</tr>
+<tr>
+<td align="left">BINDER_SET_MAX_THREADS</td>
+<td align="left">__u32</td>
+<td align="left">设置Binder线程最大个数</td>
+</tr>
+<tr>
+<td align="left">BINDER_SET_CONTEXT_MGR</td>
+<td align="left">__s32</td>
+<td align="left">设置Service Manager节点</td>
+</tr>
+<tr>
+<td align="left">BINDER_THREAD_EXIT</td>
+<td align="left">__s32</td>
+<td align="left">释放Binder线程</td>
+</tr>
+<tr>
+<td align="left">BINDER_VERSION</td>
+<td align="left">struct binder_version</td>
+<td align="left">获取Binder版本信息</td>
+</tr>
+<tr>
+<td align="left">BINDER_SET_IDLE_TIMEOUT</td>
+<td align="left">__s64</td>
+<td align="left">没有使用</td>
+</tr>
+<tr>
+<td align="left">BINDER_SET_IDLE_PRIORITY</td>
+<td align="left">__s32</td>
+<td align="left">没有使用</td>
+</tr>
+</tbody></table>
+<p>最重点的是读写操作<strong>BINDER_WRITE_READ</strong>。</p>
+<p>需要注意的是他还提供了一个命令BINDER_SET_CONTEXT_MGR，是将该Binder Server设置为Service Manager节点，该命令为ServiceManager独有的。</p>
+<h2 id="ServiceManager（Binder-Server）"><a href="#ServiceManager（Binder-Server）" class="headerlink" title="ServiceManager（Binder Server）"></a>ServiceManager（Binder Server）</h2><p>位置：/<a href="http://androidxref.com/8.1.0_r33/xref/frameworks/" target="_blank" rel="noopener">frameworks</a>/<a href="http://androidxref.com/8.1.0_r33/xref/frameworks/native/" target="_blank" rel="noopener">native</a>/<a href="http://androidxref.com/8.1.0_r33/xref/frameworks/native/cmds/" target="_blank" rel="noopener">cmds</a>/<a href="http://androidxref.com/8.1.0_r33/xref/frameworks/native/cmds/servicemanager/" target="_blank" rel="noopener">servicemanager</a>/<a href="http://androidxref.com/8.1.0_r33/xref/frameworks/native/cmds/servicemanager/service_manager.c" target="_blank" rel="noopener">service_manager.c</a></p>
+<p>ServiceManager在显示网络中相当于我们的DNS服务器，服务端向其注册自己正式的地址，客户端向其查询并获取对应服务。</p>
+<p>就像DNS服务器一样，ServiceManager必须在用户使用Binder之前就准备就绪，所以它是由init程序在解析init.rc时启动的，一旦ServiceManager发生问题后重启，其他的系统程序zygote，media，surfaceflinger和drm也会被重新加载。</p>
+<h3 id="一、ServiceManager启动流程"><a href="#一、ServiceManager启动流程" class="headerlink" title="一、ServiceManager启动流程"></a>一、ServiceManager启动流程</h3><p>1、打开Binder设备，做好初始化</p>
+<p>2、将自己设置为Binder大管家（BINDER_SET_CONTEXT_MGR）</p>
+<p>3、通知Binder驱动，告知其大管家已就位，等待命令，进入主循环，获取并执行指令。</p>
+<h3 id="二、主循环中做了什么"><a href="#二、主循环中做了什么" class="headerlink" title="二、主循环中做了什么"></a>二、主循环中做了什么</h3><p>它会不断的从Binder驱动中通过ioctl函数的<strong>BINDER_WRITE_READ</strong>取出消息（命令）并进行处理，直到收到退出的消息。</p>
+<p>在BR_TRANSACTION命令中主要处理以下功能</p>
+<p>1、注册Binder Server以供查询</p>
+<p>2、应用程序请求查询并获取Binder Server所对应的句柄</p>
+<p>binder_prase方法中的命令</p>
+<table>
+<thead>
+<tr>
+<th align="left">命令</th>
+<th align="center">功能</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left">SVC_MGR_GET_SERVICE</td>
+<td align="center">根据Server名称查找它的handle值</td>
+</tr>
+<tr>
+<td align="left">SVC_MGR_CHECK_SERVICE</td>
+<td align="center">根据Server名称查找它的handle值</td>
+</tr>
+<tr>
+<td align="left">SVC_MGR_ADD_SERVICE</td>
+<td align="center">用于注册一个Binder Server</td>
+</tr>
+<tr>
+<td align="left">SVC_MGR_LIST_SERVICES</td>
+<td align="center">获取列表中所有的Server</td>
+</tr>
+</tbody></table>
+<p>ServiceManager其内部维护了一个svclist列表，用于储存所有Server相关信息（以svcinfo为数据结构），查询和注册都是基于这个表展开的。</p>
+<p>在想Binder驱动发送BINDER_WRITE_READ命令读取消息时，如果没有消息就会入休眠等待。</p>
+<p>开启循环时将svcmgr_handler作为binder_handler func参数传入</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">int</span> <span class="title">main</span><span class="params">(<span class="keyword">int</span> argc, <span class="keyword">char</span>** argv)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="class"><span class="keyword">struct</span> <span class="title">binder_state</span> *<span class="title">bs</span>;</span></span><br><span class="line">    <span class="keyword">union</span> selinux_callback cb;</span><br><span class="line">    <span class="keyword">char</span> *driver;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (argc &gt; <span class="number">1</span>) &#123;</span><br><span class="line">        driver = argv[<span class="number">1</span>];</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        driver = <span class="string">"/dev/binder"</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    bs = binder_open(driver, <span class="number">128</span>*<span class="number">1024</span>);</span><br><span class="line">    <span class="keyword">if</span> (!bs) &#123;</span><br><span class="line"><span class="meta">#<span class="meta-keyword">ifdef</span> VENDORSERVICEMANAGER</span></span><br><span class="line">        ALOGW(<span class="string">"failed to open binder driver %s\n"</span>, driver);</span><br><span class="line">        <span class="keyword">while</span> (<span class="literal">true</span>) &#123;</span><br><span class="line">            sleep(UINT_MAX);</span><br><span class="line">        &#125;</span><br><span class="line"><span class="meta">#<span class="meta-keyword">else</span></span></span><br><span class="line">        ALOGE(<span class="string">"failed to open binder driver %s\n"</span>, driver);</span><br><span class="line"><span class="meta">#<span class="meta-keyword">endif</span></span></span><br><span class="line">        <span class="keyword">return</span> <span class="number">-1</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (binder_become_context_manager(bs)) &#123;</span><br><span class="line">        ALOGE(<span class="string">"cannot become context manager (%s)\n"</span>, strerror(errno));</span><br><span class="line">        <span class="keyword">return</span> <span class="number">-1</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    cb.func_audit = audit_callback;</span><br><span class="line">    selinux_set_callback(SELINUX_CB_AUDIT, cb);</span><br><span class="line">    cb.func_log = selinux_log_callback;</span><br><span class="line">    selinux_set_callback(SELINUX_CB_LOG, cb);</span><br><span class="line"></span><br><span class="line"><span class="meta">#<span class="meta-keyword">ifdef</span> VENDORSERVICEMANAGER</span></span><br><span class="line">    sehandle = selinux_android_vendor_service_context_handle();</span><br><span class="line"><span class="meta">#<span class="meta-keyword">else</span></span></span><br><span class="line">    sehandle = selinux_android_service_context_handle();</span><br><span class="line"><span class="meta">#<span class="meta-keyword">endif</span></span></span><br><span class="line">    selinux_status_open(<span class="literal">true</span>);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (sehandle == <span class="literal">NULL</span>) &#123;</span><br><span class="line">        ALOGE(<span class="string">"SELinux: Failed to acquire sehandle. Aborting.\n"</span>);</span><br><span class="line">        <span class="built_in">abort</span>();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (getcon(&amp;service_manager_context) != <span class="number">0</span>) &#123;</span><br><span class="line">        ALOGE(<span class="string">"SELinux: Failed to acquire service_manager context. Aborting.\n"</span>);</span><br><span class="line">        <span class="built_in">abort</span>();</span><br><span class="line">    &#125;</span><br><span class="line">  	<span class="comment">//svcmgr_handler是SM真正处理命令的函数</span></span><br><span class="line">    binder_loop(bs, svcmgr_handler);</span><br><span class="line">		</span><br><span class="line">    <span class="keyword">return</span> <span class="number">0</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">void</span> binder_loop(struct binder_state *bs, binder_handler func)</span><br><span class="line">&#123;</span><br><span class="line">    <span class="keyword">int</span> res;</span><br><span class="line">    <span class="class"><span class="keyword">struct</span> <span class="title">binder_write_read</span> <span class="title">bwr</span>;</span></span><br><span class="line">    <span class="keyword">uint32_t</span> readbuf[<span class="number">32</span>];</span><br><span class="line"></span><br><span class="line">    bwr.write_size = <span class="number">0</span>;</span><br><span class="line">    bwr.write_consumed = <span class="number">0</span>;</span><br><span class="line">    bwr.write_buffer = <span class="number">0</span>;</span><br><span class="line"></span><br><span class="line">    readbuf[<span class="number">0</span>] = BC_ENTER_LOOPER;</span><br><span class="line">    binder_write(bs, readbuf, <span class="keyword">sizeof</span>(<span class="keyword">uint32_t</span>));</span><br><span class="line"></span><br><span class="line">    <span class="keyword">for</span> (;;) &#123;</span><br><span class="line">        bwr.read_size = <span class="keyword">sizeof</span>(readbuf);</span><br><span class="line">        bwr.read_consumed = <span class="number">0</span>;</span><br><span class="line">        bwr.read_buffer = (<span class="keyword">uintptr_t</span>) readbuf;</span><br><span class="line"></span><br><span class="line">        res = ioctl(bs-&gt;fd, BINDER_WRITE_READ, &amp;bwr);</span><br><span class="line"></span><br><span class="line">        <span class="keyword">if</span> (res &lt; <span class="number">0</span>) &#123;</span><br><span class="line">            ALOGE(<span class="string">"binder_loop: ioctl failed (%s)\n"</span>, strerror(errno));</span><br><span class="line">            <span class="keyword">break</span>;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        res = binder_parse(bs, <span class="number">0</span>, (<span class="keyword">uintptr_t</span>) readbuf, bwr.read_consumed, func);</span><br><span class="line">        <span class="keyword">if</span> (res == <span class="number">0</span>) &#123;</span><br><span class="line">            ALOGE(<span class="string">"binder_loop: unexpected reply?!\n"</span>);</span><br><span class="line">            <span class="keyword">break</span>;</span><br><span class="line">        &#125;</span><br><span class="line">        <span class="keyword">if</span> (res &lt; <span class="number">0</span>) &#123;</span><br><span class="line">            ALOGE(<span class="string">"binder_loop: io error %d %s\n"</span>, res, strerror(errno));</span><br><span class="line">            <span class="keyword">break</span>;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+
+<h2 id="Binder架构设计思路"><a href="#Binder架构设计思路" class="headerlink" title="Binder架构设计思路"></a>Binder架构设计思路</h2><p>访问ServiceManager需要哪些步骤</p>
+<p>1、打开Binder设备</p>
+<p>2、执行mmap</p>
+<p>3、通过Binder驱动向SM发送请求</p>
+<p>4、获取结果</p>
+<p>具体问题：</p>
+<p>1、向SM发送请求的Binder Client可能是App应用，所以必须提供java层接口（java接口实现）</p>
+<p>2、每个Binder Client在使用SM时都要亲力亲为所有的步骤，未免过于繁琐。（封装易于使用）</p>
+<p>3、如果应用每次使用SM服务（或其他Binder Server）都用完成打开Binder设备，执行mmap，过于消耗系统资源（每个进程只允许打开一次Binder设备，切只进行一次内存映射，所有需要使用Binder驱动的线程共享这一资源）</p>
+<h2 id="ProcessState和IPCThreadState简介"><a href="#ProcessState和IPCThreadState简介" class="headerlink" title="ProcessState和IPCThreadState简介"></a>ProcessState和IPCThreadState简介</h2><p>ProcessState：</p>
+<p>​    专门管理每个应用进程中的Binder操作，切暴露出执行Binder驱动的一系列命令给上层用户</p>
+<p>IPCThreadState：</p>
+<p>​    保证进程中的每个线程都有于Binder驱动进行通信的能力</p>
+<p>​    binder_proc中有threads红黑树用于管理该进程中所有线程的IPC业务，基于Binder的IPC通信是阻塞的，这样保证个别thread在进行进程间通信是不会卡死整个操作系统</p>
+<h2 id="Proxy"><a href="#Proxy" class="headerlink" title="Proxy"></a>Proxy</h2><p>通过ProcessState和IPCThreadState就能通过<strong>BINDER_WRITE_READ</strong>等Binder支持的命令对其进行交互，从而获得到SM提供的服务，但是这样过于繁琐了，所以就对其进行了封装。</p>
+<p>对SM的封装类取名为<strong><em>ServiceManagerProxy</em></strong>(其他服务XXXProxy)</p>
+<h3 id="1、定义功能接口IServiceManager"><a href="#1、定义功能接口IServiceManager" class="headerlink" title="1、定义功能接口IServiceManager"></a>1、定义功能接口<strong><em>IServiceManager</em></strong></h3><p>ServiceManagerProxy所提供的服务必须与服务端ServiceManager保持一致，把对应方法提取出来就是ServiceManagerProxy的接口<strong><em>IServiceManager</em></strong>.ServiceManagerProxy必须实现IServiceManager</p>
+<h3 id="2、具体流程"><a href="#2、具体流程" class="headerlink" title="2、具体流程"></a>2、具体流程</h3><p>要获取到SM对应的功能至少需要两部分</p>
+<p>1、与Binder建立关系</p>
+<p>​    进程中有了ProcessState和IPCThreadState这两个作为与Binder驱动通信的类，Java层的代码使用Binder驱动实际上是由他们完成的，我们称之为BpBinder</p>
+<p>2、向Binder发送命令，从而获取SM提供的服务</p>
+<p><img src="/binder_2.jpg" alt="binder_2"></p>
+<h3 id="3、ServiceManagerProxy"><a href="#3、ServiceManagerProxy" class="headerlink" title="3、ServiceManagerProxy"></a>3、ServiceManagerProxy</h3><p>虽然ServiceManagerProxy已经进行了封装，但在Android中为我们提供的更进一步使用ServiceManagerProxy的封装类ServiceManager.java。</p>
+<p>ServiceManager.java中的方法都是static的，我们在使用时不需要创建其对象</p>
+<p>在获取具体的代码中，以getService()的方法调用流程来看</p>
+<h5 id="1、ServiceManager-java"><a href="#1、ServiceManager-java" class="headerlink" title="1、ServiceManager.java"></a>1、ServiceManager.java</h5><p>先从sCache缓存中获取是否缓存了该服务的对象，如果有直接返回，没有执行查询操作</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">static</span> IBinder <span class="title">getService</span><span class="params">(String name)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">try</span> &#123;</span><br><span class="line">    IBinder service = sCache.get(name);<span class="comment">//缓存中查询</span></span><br><span class="line">    <span class="keyword">if</span> (service != <span class="keyword">null</span>) &#123;</span><br><span class="line">      <span class="keyword">return</span> service;<span class="comment">//查询到了直接返回</span></span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">      <span class="comment">//Binder.allowBlocking()是设置允许阻塞等待返回结果，其内部调用了</span></span><br><span class="line">      <span class="comment">//((BinderProxy) binder).mWarnOnBlocking = false;</span></span><br><span class="line">      <span class="comment">//表示该接口允许阻塞，至于系统进程会将该变量设为true</span></span><br><span class="line">      <span class="comment">//相关知识：IBinder.FLAG_ONEWAY带有该flag的接口方法表示不等待返回结果，只通知到服务即结束</span></span><br><span class="line">      <span class="keyword">return</span> Binder.allowBlocking(rawGetService(name));</span><br><span class="line">    &#125;</span><br><span class="line">  &#125; <span class="keyword">catch</span> (RemoteException e) &#123;</span><br><span class="line">    Log.e(TAG, <span class="string">"error in getService"</span>, e);</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="keyword">return</span> <span class="keyword">null</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>调用getIServiceManager获取执行ServiceManagerNative.asInterface()来获取一个IServiceManager</p>
+<p>其中BinderInternal.getContextObject()获取到的是一个IBinder对象</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">private</span> <span class="keyword">static</span> IBinder <span class="title">rawGetService</span><span class="params">(String name)</span> <span class="keyword">throws</span> RemoteException </span>&#123;</span><br><span class="line">  ...<span class="comment">//加log</span></span><br><span class="line">    <span class="keyword">final</span> IBinder binder = getIServiceManager().getService(name);</span><br><span class="line">  ...<span class="comment">//加log</span></span><br><span class="line">    <span class="keyword">return</span> binder;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">private</span> <span class="keyword">static</span> IServiceManager <span class="title">getIServiceManager</span><span class="params">()</span> </span>&#123;</span><br><span class="line">  <span class="keyword">if</span> (sServiceManager != <span class="keyword">null</span>) &#123;</span><br><span class="line">    <span class="keyword">return</span> sServiceManager;</span><br><span class="line">  &#125;</span><br><span class="line"></span><br><span class="line">  <span class="comment">// Find the service manager</span></span><br><span class="line">  sServiceManager = ServiceManagerNative</span><br><span class="line">    .asInterface(Binder.allowBlocking(BinderInternal.getContextObject()));</span><br><span class="line">  <span class="keyword">return</span> sServiceManager;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h5 id="2、ServiceManagerNative-java"><a href="#2、ServiceManagerNative-java" class="headerlink" title="2、ServiceManagerNative.java"></a>2、ServiceManagerNative.java</h5><p>将一个IBinder对象转换为IServiceManager，并在需要时生成ServiceManagerProxy对象</p>
+<p>queryLocalInterface：查询本地是否有IServiceManager存在</p>
+<p>如果没有则创建一个ServiceManagerProxy</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * Cast a Binder object into a service manager interface, generating</span></span><br><span class="line"><span class="comment"> * a proxy if needed.</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">public</span> IServiceManager <span class="title">asInterface</span><span class="params">(IBinder obj)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">  <span class="keyword">if</span> (obj == <span class="keyword">null</span>) &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="keyword">null</span>;</span><br><span class="line">  &#125;</span><br><span class="line">  IServiceManager in =</span><br><span class="line">    (IServiceManager)obj.queryLocalInterface(descriptor);</span><br><span class="line">  <span class="keyword">if</span> (in != <span class="keyword">null</span>) &#123;</span><br><span class="line">    <span class="keyword">return</span> in;</span><br><span class="line">  &#125;</span><br><span class="line"></span><br><span class="line">  <span class="keyword">return</span> <span class="keyword">new</span> ServiceManagerProxy(obj);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h5 id="3、ServiceManagerProxy-1"><a href="#3、ServiceManagerProxy-1" class="headerlink" title="3、ServiceManagerProxy"></a>3、ServiceManagerProxy</h5><p>ServiceManagerProxy是ServiceManagerNative.java中的内部类</p>
+<p>构造函数中ServiceManagerProxy会持有IBinder对象的引用<strong><em>mRemote</em></strong></p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="title">ServiceManagerProxy</span><span class="params">(IBinder remote)</span> </span>&#123;</span><br><span class="line">        mRemote = remote;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>在需要服务时使用这个引用获取具体服务</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> IBinder <span class="title">getService</span><span class="params">(String name)</span> <span class="keyword">throws</span> RemoteException </span>&#123;</span><br><span class="line">  Parcel data = Parcel.obtain();</span><br><span class="line">  Parcel reply = Parcel.obtain();</span><br><span class="line">  data.writeInterfaceToken(IServiceManager.descriptor);</span><br><span class="line">  data.writeString(name);</span><br><span class="line">  mRemote.transact(GET_SERVICE_TRANSACTION, data, reply, <span class="number">0</span>);</span><br><span class="line">  IBinder binder = reply.readStrongBinder();</span><br><span class="line">  reply.recycle();</span><br><span class="line">  data.recycle();</span><br><span class="line">  <span class="keyword">return</span> binder;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>上面的方法包含三个部分</p>
+<p>1、准备数据</p>
+<p>就是将数据打包为Parcel</p>
+<p>2、IBinder.transact</p>
+<p>使用IBinder对面的transact方法将请求发送出去，而不需要理会Binder的open，mmap，ioctl等具体协议命令，所以这个IBinder一定在内部调用了ProcessState和IPCThreadState来与Binder驱动进行通信。</p>
+<p>3、获取结果</p>
+<p>获取结果是阻塞式的，因为涉及到进程间通信，结果并不会马上获取到，所以Binder驱动一定会将调用者线程挂起，知道有了结果才能把它唤醒。</p>
+<p>GET_SERVICE_TRANSACTION这种命令业务代码在客户端和服务端必须保持一致，我们在使用AIDL时会自动生成。</p>
+<h2 id="IBinder和BpBinder"><a href="#IBinder和BpBinder" class="headerlink" title="IBinder和BpBinder"></a>IBinder和BpBinder</h2><p>Binder提供的功能可以在IBinder接口中找到</p>
+<p>IBinder中至少包含以下方法：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="meta">@Nullable</span> <span class="function">IInterface <span class="title">queryLocalInterface</span><span class="params">(@NonNull String descriptor)</span></span>;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">boolean</span> <span class="title">transact</span><span class="params">(<span class="keyword">int</span> code, @NonNull Parcel data, @Nullable Parcel reply, <span class="keyword">int</span> flags)</span></span></span><br><span class="line"><span class="function">        <span class="keyword">throws</span> RemoteException</span>;</span><br></pre></td></tr></table></figure>
+
+<p>获取IBinder对象的类为BinderInternal</p>
+<p>其中定义了方法</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="keyword">native</span> IBinder <span class="title">getContextObject</span><span class="params">()</span></span>;</span><br></pre></td></tr></table></figure>
+
+<p>这是一个jni方法，显然还有对应的Native方法，其可以在android_util_Binder.cpp中找到</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> jobject <span class="title">android_os_BinderInternal_getContextObject</span><span class="params">(JNIEnv* env, jobject clazz)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    sp&lt;IBinder&gt; b = ProcessState::self()-&gt;getContextObject(<span class="literal">NULL</span>);</span><br><span class="line">    <span class="keyword">return</span> javaObjectForIBinder(env, b);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>显然IBinder（native）对象是由ProcessState创建，然后使用javaObjectForIBinder转化为java层的IBinder（java）对象的。而IBinder(Native)是一个接口，其具体实现类就是BpBinder</p>
+<p><img src="/binder_3.jpg" alt="binder_3"></p>
+<p>BinderProxy和BpBinder分别继承自Java和Native层的IBinder接口，其中BpBinder是有ProcessState创建的，BinderProxy是使用javaObjectForIBinder()函数通过JNI的NewObject()创建的。</p>
+<p>BinderProxy中的transact方法在native层的具体实现：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> jboolean <span class="title">android_os_BinderProxy_transact</span><span class="params">(JNIEnv* env, jobject obj,</span></span></span><br><span class="line"><span class="function"><span class="params">        jint code, jobject dataObj, jobject replyObj, jint flags)</span> <span class="comment">// throws RemoteException</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    ...</span><br><span class="line">    Parcel* data = parcelForJavaObject(env, dataObj);</span><br><span class="line">  	...</span><br><span class="line">    Parcel* reply = parcelForJavaObject(env, replyObj);</span><br><span class="line">    ...</span><br><span class="line"></span><br><span class="line">    IBinder* target = getBPNativeData(env, obj)-&gt;mObject.<span class="built_in">get</span>();</span><br><span class="line">    ...</span><br><span class="line">    <span class="keyword">status_t</span> err = target-&gt;transact(code, *data, reply, flags);</span><br><span class="line">    ...</span><br><span class="line">    signalExceptionForError(env, obj, err, <span class="literal">true</span> <span class="comment">/*canThrowRemoteException*/</span>, data-&gt;dataSize());</span><br><span class="line">    <span class="keyword">return</span> JNI_FALSE;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>传参中的dataObj，replyObj分别对应BinderProxy.transact中的Parcel data, Parcel reply,需要先将它们转化为native中的Parcel实现。</p>
+<p>前面通过javaObjectForIBinder将一个BpBinder转化为BinderProxy，这里还要转化回来BpBinder。</p>
+<p>最终通过BpBinder.transcat来处理用户的Binder请求。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">status_t</span> <span class="title">BpBinder::transact</span><span class="params">(</span></span></span><br><span class="line"><span class="function"><span class="params">    <span class="keyword">uint32_t</span> code, <span class="keyword">const</span> Parcel&amp; data, Parcel* reply, <span class="keyword">uint32_t</span> flags)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="comment">// Once a binder has died, it will never come back to life.</span></span><br><span class="line">    <span class="keyword">if</span> (mAlive) &#123;</span><br><span class="line">        <span class="keyword">status_t</span> status = IPCThreadState::self()-&gt;transact(</span><br><span class="line">            mHandle, code, data, reply, flags);</span><br><span class="line">        <span class="keyword">if</span> (status == DEAD_OBJECT) mAlive = <span class="number">0</span>;</span><br><span class="line">        <span class="keyword">return</span> status;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> DEAD_OBJECT;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>可以看到最终都是通过ProcessState和IPCThreadState来实现的。</p>
+<h2 id="ProcessState和IPCThreadState详解"><a href="#ProcessState和IPCThreadState详解" class="headerlink" title="ProcessState和IPCThreadState详解"></a>ProcessState和IPCThreadState详解</h2><h3 id="ProcessState"><a href="#ProcessState" class="headerlink" title="ProcessState"></a>ProcessState</h3><p>1、保证同一个进程中只有一个ProcessState实例存在，而且只有在ProcessState对象创建时才打开Binder设备以及做内存映射</p>
+<p>2、向上层提供IPC服务</p>
+<p>3、与IPCThreadState分工合作，各司其职</p>
+<p>创建ProcessState</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">sp&lt;ProcessState&gt; <span class="title">ProcessState::self</span><span class="params">()</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    Mutex::Autolock _l(gProcessMutex);</span><br><span class="line">    <span class="keyword">if</span> (gProcess != <span class="literal">NULL</span>) &#123;</span><br><span class="line">        <span class="keyword">return</span> gProcess;</span><br><span class="line">    &#125;</span><br><span class="line">    gProcess = <span class="keyword">new</span> ProcessState(<span class="string">"/dev/binder"</span>);</span><br><span class="line">    <span class="keyword">return</span> gProcess;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>构造函数：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br></pre></td><td class="code"><pre><span class="line">ProcessState::ProcessState(<span class="keyword">const</span> <span class="keyword">char</span> *driver)</span><br><span class="line">    : mDriverName(String8(driver))</span><br><span class="line">    , mDriverFD(open_driver(driver))<span class="comment">//在这里执行了open</span></span><br><span class="line">    , mVMStart(MAP_FAILED)</span><br><span class="line">    , mThreadCountLock(PTHREAD_MUTEX_INITIALIZER)</span><br><span class="line">    , mThreadCountDecrement(PTHREAD_COND_INITIALIZER)</span><br><span class="line">    , mExecutingThreadsCount(<span class="number">0</span>)</span><br><span class="line">    , mMaxThreads(DEFAULT_MAX_BINDER_THREADS)</span><br><span class="line">    , mStarvationStartTimeMs(<span class="number">0</span>)</span><br><span class="line">    , mManagesContexts(<span class="literal">false</span>)</span><br><span class="line">    , mBinderContextCheckFunc(<span class="literal">NULL</span>)</span><br><span class="line">    , mBinderContextUserData(<span class="literal">NULL</span>)</span><br><span class="line">    , mThreadPoolStarted(<span class="literal">false</span>)</span><br><span class="line">    , mThreadPoolSeq(<span class="number">1</span>)</span><br><span class="line">&#123;</span><br><span class="line">    <span class="keyword">if</span> (mDriverFD &gt;= <span class="number">0</span>) &#123;<span class="comment">//如果成功打开了/dev/binder</span></span><br><span class="line">        <span class="comment">// mmap the binder, providing a chunk of virtual address space to receive transactions.</span></span><br><span class="line">      	<span class="comment">//进行内存分配，执行mmap</span></span><br><span class="line">      	<span class="comment">//define BINDER_VM_SIZE ((1 * 1024 * 1024) - sysconf(_SC_PAGE_SIZE) * 2)接近1M的</span></span><br><span class="line">        mVMStart = mmap(<span class="number">0</span>, BINDER_VM_SIZE, PROT_READ, MAP_PRIVATE | MAP_NORESERVE, mDriverFD, <span class="number">0</span>);</span><br><span class="line">        <span class="keyword">if</span> (mVMStart == MAP_FAILED) &#123;</span><br><span class="line">            <span class="comment">// *sigh*</span></span><br><span class="line">            ALOGE(<span class="string">"Using %s failed: unable to mmap transaction memory.\n"</span>, mDriverName.c_str());</span><br><span class="line">            <span class="built_in">close</span>(mDriverFD);</span><br><span class="line">            mDriverFD = <span class="number">-1</span>;</span><br><span class="line">            mDriverName.<span class="built_in">clear</span>();</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    LOG_ALWAYS_FATAL_IF(mDriverFD &lt; <span class="number">0</span>, <span class="string">"Binder driver could not be opened.  Terminating."</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>而上面我们使用的BinderIntrnal的getContextObject()，函数也可以在ProcessState中找到</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">sp&lt;IBinder&gt; <span class="title">ProcessState::getContextObject</span><span class="params">(<span class="keyword">const</span> sp&lt;IBinder&gt;&amp; <span class="comment">/*caller*/</span>)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="keyword">return</span> getStrongProxyForHandle(<span class="number">0</span>);<span class="comment">//这里传入0代表Service Manager</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>具体的函数实现</p>
+<p>lookupHandleLocked()：查找一个Vector表mHandleToObject，这里保存了这个进程已经创建的Binder相关信息</p>
+<p>如果上面的表中没有相应节点，就会自动添加一个</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">sp&lt;IBinder&gt; <span class="title">ProcessState::getStrongProxyForHandle</span><span class="params">(<span class="keyword">int32_t</span> handle)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    sp&lt;IBinder&gt; result;</span><br><span class="line"></span><br><span class="line">    AutoMutex _l(mLock);</span><br><span class="line"></span><br><span class="line">    handle_entry* e = lookupHandleLocked(handle);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (e != <span class="literal">NULL</span>) &#123;</span><br><span class="line">        <span class="comment">// We need to create a new BpBinder if there isn't currently one, OR we</span></span><br><span class="line">        <span class="comment">// are unable to acquire a weak reference on this current one.  See comment</span></span><br><span class="line">        <span class="comment">// in getWeakProxyForHandle() for more info about this.</span></span><br><span class="line">        IBinder* b = e-&gt;binder;</span><br><span class="line">        <span class="keyword">if</span> (b == <span class="literal">NULL</span> || !e-&gt;refs-&gt;attemptIncWeak(<span class="keyword">this</span>)) &#123;</span><br><span class="line">            <span class="keyword">if</span> (handle == <span class="number">0</span>) &#123;</span><br><span class="line">                <span class="comment">// Special case for context manager...</span></span><br><span class="line">                <span class="comment">// The context manager is the only object for which we create</span></span><br><span class="line">                <span class="comment">// a BpBinder proxy without already holding a reference.</span></span><br><span class="line">                <span class="comment">// Perform a dummy transaction to ensure the context manager</span></span><br><span class="line">                <span class="comment">// is registered before we create the first local reference</span></span><br><span class="line">                <span class="comment">// to it (which will occur when creating the BpBinder).</span></span><br><span class="line">                <span class="comment">// If a local reference is created for the BpBinder when the</span></span><br><span class="line">                <span class="comment">// context manager is not present, the driver will fail to</span></span><br><span class="line">                <span class="comment">// provide a reference to the context manager, but the</span></span><br><span class="line">                <span class="comment">// driver API does not return status.</span></span><br><span class="line">                <span class="comment">//</span></span><br><span class="line">                <span class="comment">// Note that this is not race-free if the context manager</span></span><br><span class="line">                <span class="comment">// dies while this code runs.</span></span><br><span class="line">                <span class="comment">//</span></span><br><span class="line">                <span class="comment">// <span class="doctag">TODO:</span> add a driver API to wait for context manager, or</span></span><br><span class="line">                <span class="comment">// stop special casing handle 0 for context manager and add</span></span><br><span class="line">                <span class="comment">// a driver API to get a handle to the context manager with</span></span><br><span class="line">                <span class="comment">// proper reference counting.</span></span><br><span class="line"></span><br><span class="line">                Parcel data;</span><br><span class="line">                <span class="keyword">status_t</span> status = IPCThreadState::self()-&gt;transact(</span><br><span class="line">                        <span class="number">0</span>, IBinder::PING_TRANSACTION, data, <span class="literal">NULL</span>, <span class="number">0</span>);</span><br><span class="line">                <span class="keyword">if</span> (status == DEAD_OBJECT)</span><br><span class="line">                   <span class="keyword">return</span> <span class="literal">NULL</span>;</span><br><span class="line">            &#125;</span><br><span class="line"></span><br><span class="line">            b = BpBinder::create(handle);</span><br><span class="line">            e-&gt;binder = b;</span><br><span class="line">            <span class="keyword">if</span> (b) e-&gt;refs = b-&gt;getWeakRefs();</span><br><span class="line">            result = b;</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="comment">// This little bit of nastyness is to allow us to add a primary</span></span><br><span class="line">            <span class="comment">// reference to the remote proxy when this team doesn't have one</span></span><br><span class="line">            <span class="comment">// but another team is sending the handle to us.</span></span><br><span class="line">            result.force_set(b);</span><br><span class="line">            e-&gt;refs-&gt;decWeak(<span class="keyword">this</span>);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> result;</span><br><span class="line">&#125;</span><br><span class="line"><span class="function">ProcessState::handle_entry* <span class="title">ProcessState::lookupHandleLocked</span><span class="params">(<span class="keyword">int32_t</span> handle)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="keyword">const</span> <span class="keyword">size_t</span> N=mHandleToObject.<span class="built_in">size</span>();</span><br><span class="line">    <span class="keyword">if</span> (N &lt;= (<span class="keyword">size_t</span>)handle) &#123;</span><br><span class="line">        handle_entry e;</span><br><span class="line">        e.binder = <span class="literal">NULL</span>;</span><br><span class="line">        e.refs = <span class="literal">NULL</span>;</span><br><span class="line">        <span class="keyword">status_t</span> err = mHandleToObject.insertAt(e, N, handle+<span class="number">1</span>-N);</span><br><span class="line">        <span class="keyword">if</span> (err &lt; NO_ERROR) <span class="keyword">return</span> <span class="literal">NULL</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">return</span> &amp;mHandleToObject.editItemAt(handle);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>在上面的代码中我们看到ProcessState中有一个全局列表来记录所有所有的与Binder对象相关的信息，每个表项是一个handle_entry，包含了如下数据</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">struct</span> <span class="title">handle_entry</span>&#123;</span></span><br><span class="line">	Ibinder* binder;</span><br><span class="line">	RefBase::weakref_type* refs</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>其中binder属性实际上是一个BpBinder，而且程序只有在以下两种情况下才会生成一个BpBinder</p>
+<p>1、在列表中没有找到对应的BpBinder</p>
+<p>2、虽然在列表中查找到了对应节点，但是没有办法顺利的对这个BpBinder增加weakreference</p>
+<p>BpBinder的构造</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">BpBinder::BpBinder(<span class="keyword">int32_t</span> handle, <span class="keyword">int32_t</span> trackedUid)</span><br><span class="line">    : mHandle(handle)</span><br><span class="line">    , mAlive(<span class="number">1</span>)</span><br><span class="line">    , mObitsSent(<span class="number">0</span>)</span><br><span class="line">    , mObituaries(<span class="literal">NULL</span>)</span><br><span class="line">    , mTrackedUid(trackedUid)</span><br><span class="line">&#123;</span><br><span class="line">    ALOGV(<span class="string">"Creating BpBinder %p handle %d\n"</span>, <span class="keyword">this</span>, mHandle);</span><br><span class="line"></span><br><span class="line">    extendObjectLifetime(OBJECT_LIFETIME_WEAK);</span><br><span class="line">    IPCThreadState::self()-&gt;incWeakHandle(handle, <span class="keyword">this</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这个ProcessState::getContextObject就得到了一个BpBinder,且其中的mHandle代表了这个Proxy的主人，之后再传递给Client时再转化为IBinder</p>
+<h3 id="IPCThreadState"><a href="#IPCThreadState" class="headerlink" title="IPCThreadState"></a>IPCThreadState</h3><p>1、保证IPCThreadState在线程中唯一，且其他线程不可使用</p>
+<p>2、真正的完成与底层BinderDriver间的通信工作</p>
+<p>为了保障其他线程不能使用，就需要TLS（Thread Local Storage）机制，它能保障某个变量仅在自己的线程内访问有效，在其他线程中得到的是这个变量的独立复本，互不干扰。</p>
+<p>先来看看IPCThreadState的Self函数，</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">IPCThreadState* <span class="title">IPCThreadState::self</span><span class="params">()</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="keyword">if</span> (gHaveTLS) &#123;<span class="comment">//gHaveTLS这个参数初始值为false</span></span><br><span class="line">restart:<span class="comment">//当启动TLS后，重新回到这里执行</span></span><br><span class="line">        <span class="keyword">const</span> <span class="keyword">pthread_key_t</span> k = gTLS;</span><br><span class="line">        IPCThreadState* st = (IPCThreadState*)pthread_getspecific(k);</span><br><span class="line">        <span class="keyword">if</span> (st) <span class="keyword">return</span> st;</span><br><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> IPCThreadState;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (gShutdown) &#123;</span><br><span class="line">        ALOGW(<span class="string">"Calling IPCThreadState::self() during shutdown is dangerous, expect a crash.\n"</span>);</span><br><span class="line">        <span class="keyword">return</span> <span class="literal">NULL</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    pthread_mutex_lock(&amp;gTLSMutex);</span><br><span class="line">    <span class="keyword">if</span> (!gHaveTLS) &#123;</span><br><span class="line">      <span class="comment">//启动TLS</span></span><br><span class="line">        <span class="keyword">int</span> key_create_value = pthread_key_create(&amp;gTLS, threadDestructor);</span><br><span class="line">        <span class="keyword">if</span> (key_create_value != <span class="number">0</span>) &#123;</span><br><span class="line">            pthread_mutex_unlock(&amp;gTLSMutex);</span><br><span class="line">            ALOGW(<span class="string">"IPCThreadState::self() unable to create TLS key, expect a crash: %s\n"</span>,</span><br><span class="line">                    strerror(key_create_value));</span><br><span class="line">            <span class="keyword">return</span> <span class="literal">NULL</span>;</span><br><span class="line">        &#125;</span><br><span class="line">        gHaveTLS = <span class="literal">true</span>;<span class="comment">//以后就都是TLS了</span></span><br><span class="line">    &#125;</span><br><span class="line">    pthread_mutex_unlock(&amp;gTLSMutex);</span><br><span class="line">    <span class="keyword">goto</span> restart;<span class="comment">//回到restart接着执行</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>开始执行时不执行第一个if判断，执行完第二个if判断开启TLS，然后回到restart处，继续执行第一个if判断，判断当前线程是否已经创建了IPCThreadState，如果pthread_getspecific不为空，则直接返回，如果为空，则创建一个新的IPCThreadState。</p>
+<p>IPCThreadState是真正与Binder驱动进行交互的类，ProcessState只是进行了open和mmap操作，所以IPCThreadState的transact就非常重要</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">status_t</span> <span class="title">IPCThreadState::transact</span><span class="params">(<span class="keyword">int32_t</span> handle,</span></span></span><br><span class="line"><span class="function"><span class="params">                                  <span class="keyword">uint32_t</span> code, <span class="keyword">const</span> Parcel&amp; data,</span></span></span><br><span class="line"><span class="function"><span class="params">                                  Parcel* reply, <span class="keyword">uint32_t</span> flags)</span></span></span><br></pre></td></tr></table></figure>
+
+<p>下面我们以ServiceManager中提供的getService方法的代入流程。看看Client，BinderDriver，Server都做了什么</p>
+<h4 id="Client"><a href="#Client" class="headerlink" title="Client"></a>Client</h4><p>getService@ServiceManagerProxy—&gt;transact@BinderProxy–&gt;transact@BpBinder–&gt;transact@IPCThreadState</p>
+<p>针对getService方法，参数对应为：</p>
+<p>handle 为0</p>
+<p>code为GET_SERVICE_TRANSACTION</p>
+<p>data</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">flags |= TF_ACCEPT_FDS;</span><br></pre></td></tr></table></figure>
+
+<p>Transaction共有4中flag：</p>
+<p>TF_ONE_WAY：当前业务是异步的，不需要等待</p>
+<p>TF_ROOT_OBJECT: 所包含内容是跟对象</p>
+<p>TF_STATUS_CODE: 所包含内容是32-bit的状态值</p>
+<p>TF_ACCEPT_FDS = 0x10: 允许恢复中包含文字描述符</p>
+<p>接下来就是整理数据，将它打包成Binder驱动协议规定的格式，这个过程在writeTransactionData中完成。该函数只处理数据并打包，不执行发送操作。</p>
+<p>发送操作在waitForResponse函数中的talkWithDriver函数中进行</p>
+<p>waitForResponse:</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">status_t</span> <span class="title">IPCThreadState::waitForResponse</span><span class="params">(Parcel *reply, <span class="keyword">status_t</span> *acquireResult)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="keyword">uint32_t</span> cmd;</span><br><span class="line">    <span class="keyword">int32_t</span> err;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">while</span> (<span class="number">1</span>) &#123;<span class="comment">//循环等待结果</span></span><br><span class="line">        <span class="keyword">if</span> ((err=talkWithDriver()) &lt; NO_ERROR) <span class="keyword">break</span>;<span class="comment">//处理与Binder间的交互命令，内部为阻塞式的</span></span><br><span class="line">        err = mIn.errorCheck();<span class="comment">//执行到这一行时说明已经给出了响应</span></span><br><span class="line">        <span class="keyword">if</span> (err &lt; NO_ERROR) <span class="keyword">break</span>;<span class="comment">//出错退出</span></span><br><span class="line">        <span class="keyword">if</span> (mIn.dataAvail() == <span class="number">0</span>) <span class="keyword">continue</span>;<span class="comment">//mIn没有数据时继续循环</span></span><br><span class="line"></span><br><span class="line">        cmd = (<span class="keyword">uint32_t</span>)mIn.readInt32();<span class="comment">//读取回复数据</span></span><br><span class="line">      	<span class="comment">//下面是对回复数据的处理</span></span><br><span class="line">...</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>talkWithDriver:真正执行Binder交互的是在这里ioctl()</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">status_t</span> <span class="title">IPCThreadState::talkWithDriver</span><span class="params">(<span class="keyword">bool</span> doReceive)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="keyword">if</span> (mProcess-&gt;mDriverFD &lt;= <span class="number">0</span>) &#123;<span class="comment">//判断Binder驱动是否已经打开</span></span><br><span class="line">        <span class="keyword">return</span> -EBADF;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    binder_write_read bwr;<span class="comment">//读写都使用这个结构体</span></span><br><span class="line">		...</span><br><span class="line">    bwr.write_consumed = <span class="number">0</span>;</span><br><span class="line">    bwr.read_consumed = <span class="number">0</span>;</span><br><span class="line">  	...</span><br><span class="line">        <span class="keyword">if</span> (ioctl(mProcess-&gt;mDriverFD, BINDER_WRITE_READ, &amp;bwr) &gt;= <span class="number">0</span>)</span><br><span class="line">    ...</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="Binder-Driver"><a href="#Binder-Driver" class="headerlink" title="Binder Driver"></a>Binder Driver</h4><p>调用到内核中的Binder.c</p>
+<p>kernel : drivers/staging/android/binder.c(/<a href="http://androidxref.com/kernel_3.18/xref/drivers/" target="_blank" rel="noopener">drivers</a>/<a href="http://androidxref.com/kernel_3.18/xref/drivers/staging/" target="_blank" rel="noopener">staging</a>/<a href="http://androidxref.com/kernel_3.18/xref/drivers/staging/android/" target="_blank" rel="noopener">android</a>/<a href="http://androidxref.com/kernel_3.18/xref/drivers/staging/android/binder.c" target="_blank" rel="noopener">binder.c</a>)</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">long</span> <span class="title">binder_ioctl</span><span class="params">(struct file *filp, <span class="keyword">unsigned</span> <span class="keyword">int</span> cmd, <span class="keyword">unsigned</span> <span class="keyword">long</span> arg)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">	<span class="keyword">int</span> ret;</span><br><span class="line">	<span class="class"><span class="keyword">struct</span> <span class="title">binder_proc</span> *<span class="title">proc</span> = <span class="title">filp</span>-&gt;<span class="title">private_data</span>;</span><span class="comment">//从filp中取出proc变量，即binder_open中动态创建的实例</span></span><br><span class="line">	<span class="class"><span class="keyword">struct</span> <span class="title">binder_thread</span> *<span class="title">thread</span>;</span></span><br><span class="line">	<span class="keyword">unsigned</span> <span class="keyword">int</span> <span class="built_in">size</span> = _IOC_SIZE(cmd);<span class="comment">//命令大小</span></span><br><span class="line">	<span class="keyword">void</span> __user *ubuf = (<span class="keyword">void</span> __user *)arg;</span><br><span class="line">  </span><br><span class="line">	trace_binder_ioctl(cmd, arg);</span><br><span class="line"></span><br><span class="line">	ret = wait_event_interruptible(binder_user_error_wait, binder_stop_on_user_error &lt; <span class="number">2</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>而这时Binder驱动就会进行命令处理，并从client端Copy_from_user将指令数据拷贝到Binder驱动的虚拟内存所指向的内存空间，拷贝完成后会对指令数据进行解析，获取到目标Server所指向的进程和线程，将本次的transaction（指令+数据）添加到一个todo的队列中，等待被执行，然后就可以去唤醒目标进程，即Server，而Client将会被挂起，等待响应被唤醒。Client调用流程：binder_ioctl–&gt;binder_thread_write–&gt;binder_transaction</p>
+<h4 id="Server"><a href="#Server" class="headerlink" title="Server"></a>Server</h4><p>而在ServiceManager中我们提到了，他在运行后会进入循环等待被唤醒，当Binder驱动将其唤醒后，在主循环（binder_loop）中，会执行binder_parse，在上面SM启动时已经将svcmgr_handler作为参数传递到binder_loop中对应参数func</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//func对应SM中的svcmgr_handler函数</span></span><br><span class="line">res = binder_parse(bs, <span class="number">0</span>, (<span class="keyword">uintptr_t</span>) readbuf, bwr.read_consumed, func);</span><br></pre></td></tr></table></figure>
+
+<p>之后会进行命令解析，然后交给svcmgr_handler进行具体的用户请求处理</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">int</span> <span class="title">binder_parse</span><span class="params">(struct binder_state *bs, struct binder_io *bio,</span></span></span><br><span class="line"><span class="function"><span class="params">                 <span class="keyword">uintptr_t</span> ptr, <span class="keyword">size_t</span> <span class="built_in">size</span>, binder_handler func)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="keyword">int</span> r = <span class="number">1</span>;</span><br><span class="line">    <span class="keyword">uintptr_t</span> <span class="built_in">end</span> = ptr + (<span class="keyword">uintptr_t</span>) <span class="built_in">size</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">while</span> (ptr &lt; <span class="built_in">end</span>) &#123;</span><br><span class="line">        <span class="keyword">uint32_t</span> cmd = *(<span class="keyword">uint32_t</span> *) ptr;</span><br><span class="line">        ptr += <span class="keyword">sizeof</span>(<span class="keyword">uint32_t</span>);</span><br><span class="line"><span class="meta">#<span class="meta-keyword">if</span> TRACE</span></span><br><span class="line">        <span class="built_in">fprintf</span>(<span class="built_in">stderr</span>,<span class="string">"%s:\n"</span>, cmd_name(cmd));</span><br><span class="line"><span class="meta">#<span class="meta-keyword">endif</span></span></span><br><span class="line">        <span class="keyword">switch</span>(cmd) &#123;</span><br><span class="line">            ...</span><br><span class="line">        <span class="keyword">case</span> BR_TRANSACTION: &#123;</span><br><span class="line">            <span class="class"><span class="keyword">struct</span> <span class="title">binder_transaction_data</span> *<span class="title">txn</span> = (<span class="title">struct</span> <span class="title">binder_transaction_data</span> *) <span class="title">ptr</span>;</span></span><br><span class="line">            <span class="keyword">if</span> ((<span class="built_in">end</span> - ptr) &lt; <span class="keyword">sizeof</span>(*txn)) &#123;</span><br><span class="line">                ALOGE(<span class="string">"parse: txn too small!\n"</span>);</span><br><span class="line">                <span class="keyword">return</span> <span class="number">-1</span>;</span><br><span class="line">            &#125;</span><br><span class="line">            binder_dump_txn(txn);</span><br><span class="line">            <span class="keyword">if</span> (func) &#123;</span><br><span class="line">                <span class="keyword">unsigned</span> rdata[<span class="number">256</span>/<span class="number">4</span>];</span><br><span class="line">                <span class="class"><span class="keyword">struct</span> <span class="title">binder_io</span> <span class="title">msg</span>;</span></span><br><span class="line">                <span class="class"><span class="keyword">struct</span> <span class="title">binder_io</span> <span class="title">reply</span>;</span><span class="comment">//初始化reply</span></span><br><span class="line">                <span class="keyword">int</span> res;</span><br><span class="line"></span><br><span class="line">                bio_init(&amp;reply, rdata, <span class="keyword">sizeof</span>(rdata), <span class="number">4</span>);</span><br><span class="line">                bio_init_from_txn(&amp;msg, txn);</span><br><span class="line">                res = func(bs, txn, &amp;msg, &amp;reply);<span class="comment">//针对sm这里的func为svcmgr_handler</span></span><br><span class="line">                <span class="keyword">if</span> (txn-&gt;flags &amp; TF_ONE_WAY) &#123;</span><br><span class="line">                    binder_free_buffer(bs, txn-&gt;data.ptr.<span class="built_in">buffer</span>);</span><br><span class="line">                &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">                  	<span class="comment">//在该方法中进行组装reply，并写入binder驱动</span></span><br><span class="line">                    binder_send_reply(bs, &amp;reply, txn-&gt;data.ptr.<span class="built_in">buffer</span>, res);</span><br><span class="line">                &#125;</span><br><span class="line">            &#125;</span><br><span class="line">            ptr += <span class="keyword">sizeof</span>(*txn);</span><br><span class="line">            <span class="keyword">break</span>;</span><br><span class="line">        &#125;</span><br><span class="line">        ...</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>在SM组装好reply数据后，执行</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">binder_send_reply(bs, &amp;reply, txn-&gt;data.ptr.<span class="built_in">buffer</span>, res);</span><br></pre></td></tr></table></figure>
+
+<p>方法将其组装为binder驱动需要的数据格式（指令+数据），然后执行</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">binder_write(bs, &amp;data, **<span class="keyword">sizeof</span>**(data));</span><br></pre></td></tr></table></figure>
+
+<p>写入binder驱动中,再经过上面的binder_ioctl–&gt;binder_thread_write–&gt;binder_transaction进行处理</p>
+<p>在binder_transaction中执行下面的case:</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> (; offp &lt; off_end; offp++) &#123;</span><br><span class="line">		<span class="class"><span class="keyword">struct</span> <span class="title">flat_binder_object</span> *<span class="title">fp</span>;</span></span><br><span class="line">...</span><br><span class="line">  fp = (struct flat_binder_object *)(<span class="built_in">buffer</span>-&gt;data + *offp);<span class="comment">//获取一个object</span></span><br><span class="line">  <span class="keyword">switch</span> (fp-&gt;type) &#123;</span><br><span class="line">...</span><br><span class="line">  	<span class="keyword">case</span> BINDER_TYPE_HANDLE:<span class="comment">//如果这个object是Handle类型的</span></span><br><span class="line">    <span class="keyword">case</span> BINDER_TYPE_WEAK_HANDLE: &#123;</span><br><span class="line">          <span class="class"><span class="keyword">struct</span> <span class="title">binder_ref</span> *<span class="title">ref</span> = <span class="title">binder_get_ref</span>(<span class="title">proc</span>, <span class="title">fp</span>-&gt;<span class="title">handle</span>);</span></span><br><span class="line">          ...</span><br><span class="line">          <span class="keyword">if</span> (ref-&gt;node-&gt;proc == target_proc) &#123;<span class="comment">//目标进程和object所属进程相同</span></span><br><span class="line">            <span class="keyword">if</span> (fp-&gt;type == BINDER_TYPE_HANDLE)</span><br><span class="line">              fp-&gt;type = BINDER_TYPE_BINDER;<span class="comment">//直接可以使用内存地址</span></span><br><span class="line">            <span class="keyword">else</span></span><br><span class="line">              fp-&gt;type = BINDER_TYPE_WEAK_BINDER;</span><br><span class="line">            fp-&gt;binder = ref-&gt;node-&gt;ptr;</span><br><span class="line">            fp-&gt;cookie = ref-&gt;node-&gt;cookie;</span><br><span class="line">            binder_inc_node(ref-&gt;node, fp-&gt;type == BINDER_TYPE_BINDER, <span class="number">0</span>, <span class="literal">NULL</span>);</span><br><span class="line">            trace_binder_transaction_ref_to_node(t, ref);</span><br><span class="line">            binder_debug(BINDER_DEBUG_TRANSACTION,</span><br><span class="line">                   <span class="string">"        ref %d desc %d -&gt; node %d u%016llx\n"</span>,</span><br><span class="line">                   ref-&gt;debug_id, ref-&gt;desc, ref-&gt;node-&gt;debug_id,</span><br><span class="line">                   (u64)ref-&gt;node-&gt;ptr);</span><br><span class="line">          &#125; <span class="keyword">else</span> &#123;<span class="comment">//object不在目标进程的范围</span></span><br><span class="line">            struct binder_ref *new_ref;</span><br><span class="line"></span><br><span class="line">            new_ref = binder_get_ref_for_node(target_proc, ref-&gt;node);</span><br><span class="line">            ...</span><br><span class="line">            fp-&gt;handle = new_ref-&gt;desc;</span><br><span class="line">            binder_inc_ref(new_ref, fp-&gt;type == BINDER_TYPE_HANDLE, <span class="literal">NULL</span>);</span><br><span class="line">            trace_binder_transaction_ref_to_ref(t, ref,</span><br><span class="line">                        new_ref);</span><br><span class="line">            ...</span><br><span class="line">          &#125;</span><br><span class="line">        &#125; <span class="keyword">break</span>;</span><br></pre></td></tr></table></figure>
+
+
+
+<p>在该过程中cmd会被置位BR_REPLY</p>
+<p>处理完成后会唤醒挂起Client的进程，就会返回到IPCThreadState.waitForResponse</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">case</span> BR_REPLY:</span><br><span class="line">            &#123;</span><br><span class="line">                binder_transaction_data tr;</span><br><span class="line">                err = mIn.<span class="built_in">read</span>(&amp;tr, <span class="keyword">sizeof</span>(tr));</span><br><span class="line">                ALOG_ASSERT(err == NO_ERROR, <span class="string">"Not enough command data for brREPLY"</span>);</span><br><span class="line">                <span class="keyword">if</span> (err != NO_ERROR) <span class="keyword">goto</span> finish;</span><br><span class="line"></span><br><span class="line">                <span class="keyword">if</span> (reply) &#123;</span><br><span class="line">                    <span class="keyword">if</span> ((tr.flags &amp; TF_STATUS_CODE) == <span class="number">0</span>) &#123;</span><br><span class="line">                        reply-&gt;ipcSetDataReference(</span><br><span class="line">                            <span class="keyword">reinterpret_cast</span>&lt;<span class="keyword">const</span> <span class="keyword">uint8_t</span>*&gt;(tr.data.ptr.<span class="built_in">buffer</span>),</span><br><span class="line">                            tr.data_size,</span><br><span class="line">                            <span class="keyword">reinterpret_cast</span>&lt;<span class="keyword">const</span> <span class="keyword">binder_size_t</span>*&gt;(tr.data.ptr.offsets),</span><br><span class="line">                            tr.offsets_size/<span class="keyword">sizeof</span>(<span class="keyword">binder_size_t</span>),</span><br><span class="line">                            freeBuffer, <span class="keyword">this</span>);</span><br><span class="line">                    &#125; </span><br><span class="line">                &#125;</span><br><span class="line">            &#125;</span><br></pre></td></tr></table></figure>
+
+<p>从mIn中读取到transaction的标准格式数据,即tr.使用Parcel.ipcSetDataReference()方法将其组装为Parcal.cpp格式，这样我们就可以回到java层通过下面的方法获取到需要的数据</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">IBinder binder = reply.readStrongBinder();</span><br></pre></td></tr></table></figure>
+
+<p>readStrongBinder是Parcel.cpp中的方法:</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">status_t</span> <span class="title">Parcel::readStrongBinder</span><span class="params">(sp&lt;IBinder&gt;* val)</span> <span class="keyword">const</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="keyword">status_t</span> status = readNullableStrongBinder(val);</span><br><span class="line">    <span class="keyword">if</span> (status == OK &amp;&amp; !val-&gt;<span class="built_in">get</span>()) &#123;</span><br><span class="line">        status = UNEXPECTED_NULL;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">return</span> status;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">status_t</span> <span class="title">Parcel::readNullableStrongBinder</span><span class="params">(sp&lt;IBinder&gt;* val)</span> <span class="keyword">const</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="keyword">return</span> unflatten_binder(ProcessState::self(), *<span class="keyword">this</span>, val);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">status_t</span> <span class="title">unflatten_binder</span><span class="params">(<span class="keyword">const</span> sp&lt;ProcessState&gt;&amp; proc,</span></span></span><br><span class="line"><span class="function"><span class="params">    <span class="keyword">const</span> Parcel&amp; in, sp&lt;IBinder&gt;* out)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="keyword">const</span> flat_binder_object* flat = in.readObject(<span class="literal">false</span>);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (flat) &#123;</span><br><span class="line">        <span class="keyword">switch</span> (flat-&gt;hdr.type) &#123;</span><br><span class="line">            <span class="keyword">case</span> BINDER_TYPE_BINDER:<span class="comment">//相同进程，取出IBinder对象</span></span><br><span class="line">                *out = <span class="keyword">reinterpret_cast</span>&lt;IBinder*&gt;(flat-&gt;cookie);</span><br><span class="line">                <span class="keyword">return</span> finish_unflatten_binder(<span class="literal">NULL</span>, *flat, in);</span><br><span class="line">            <span class="keyword">case</span> BINDER_TYPE_HANDLE:<span class="comment">//不同进程，取出（Proxy）BpBinder对象</span></span><br><span class="line">                *out = proc-&gt;getStrongProxyForHandle(flat-&gt;handle);</span><br><span class="line">                <span class="keyword">return</span> finish_unflatten_binder(</span><br><span class="line">                    <span class="keyword">static_cast</span>&lt;BpBinder*&gt;(out-&gt;<span class="built_in">get</span>()), *flat, in);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">return</span> BAD_TYPE;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>proc:ProcessState调用函数：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">sp&lt;IBinder&gt; <span class="title">ProcessState::getStrongProxyForHandle</span><span class="params">(<span class="keyword">int32_t</span> handle)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    sp&lt;IBinder&gt; result;</span><br><span class="line"></span><br><span class="line">    AutoMutex _l(mLock);</span><br><span class="line"></span><br><span class="line">    handle_entry* e = lookupHandleLocked(handle);<span class="comment">//先查找当前记录</span></span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (e != <span class="literal">NULL</span>) &#123;</span><br><span class="line">        <span class="comment">// We need to create a new BpBinder if there isn't currently one, OR we</span></span><br><span class="line">        <span class="comment">// are unable to acquire a weak reference on this current one.  See comment</span></span><br><span class="line">        <span class="comment">// in getWeakProxyForHandle() for more info about this.</span></span><br><span class="line">        IBinder* b = e-&gt;binder;</span><br><span class="line">        <span class="keyword">if</span> (b == <span class="literal">NULL</span> || !e-&gt;refs-&gt;attemptIncWeak(<span class="keyword">this</span>)) &#123;</span><br><span class="line">            <span class="keyword">if</span> (handle == <span class="number">0</span>) &#123;</span><br><span class="line">                <span class="comment">// Special case for context manager...</span></span><br><span class="line">                <span class="comment">// The context manager is the only object for which we create</span></span><br><span class="line">                <span class="comment">// a BpBinder proxy without already holding a reference.</span></span><br><span class="line">                <span class="comment">// Perform a dummy transaction to ensure the context manager</span></span><br><span class="line">                <span class="comment">// is registered before we create the first local reference</span></span><br><span class="line">                <span class="comment">// to it (which will occur when creating the BpBinder).</span></span><br><span class="line">                <span class="comment">// If a local reference is created for the BpBinder when the</span></span><br><span class="line">                <span class="comment">// context manager is not present, the driver will fail to</span></span><br><span class="line">                <span class="comment">// provide a reference to the context manager, but the</span></span><br><span class="line">                <span class="comment">// driver API does not return status.</span></span><br><span class="line">                <span class="comment">//</span></span><br><span class="line">                <span class="comment">// Note that this is not race-free if the context manager</span></span><br><span class="line">                <span class="comment">// dies while this code runs.</span></span><br><span class="line">                <span class="comment">//</span></span><br><span class="line">                <span class="comment">// <span class="doctag">TODO:</span> add a driver API to wait for context manager, or</span></span><br><span class="line">                <span class="comment">// stop special casing handle 0 for context manager and add</span></span><br><span class="line">                <span class="comment">// a driver API to get a handle to the context manager with</span></span><br><span class="line">                <span class="comment">// proper reference counting.</span></span><br><span class="line"></span><br><span class="line">                Parcel data;</span><br><span class="line">                <span class="keyword">status_t</span> status = IPCThreadState::self()-&gt;transact(</span><br><span class="line">                        <span class="number">0</span>, IBinder::PING_TRANSACTION, data, <span class="literal">NULL</span>, <span class="number">0</span>);</span><br><span class="line">                <span class="keyword">if</span> (status == DEAD_OBJECT)</span><br><span class="line">                   <span class="keyword">return</span> <span class="literal">NULL</span>;</span><br><span class="line">            &#125;</span><br><span class="line"></span><br><span class="line">            b = BpBinder::create(handle);<span class="comment">//创建一个BpBinder并把handle的值付给他</span></span><br><span class="line">            e-&gt;binder = b;</span><br><span class="line">            <span class="keyword">if</span> (b) e-&gt;refs = b-&gt;getWeakRefs();</span><br><span class="line">            result = b;</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="comment">// This little bit of nastyness is to allow us to add a primary</span></span><br><span class="line">            <span class="comment">// reference to the remote proxy when this team doesn't have one</span></span><br><span class="line">            <span class="comment">// but another team is sending the handle to us.</span></span><br><span class="line">            result.force_set(b);</span><br><span class="line">            e-&gt;refs-&gt;decWeak(<span class="keyword">this</span>);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> result;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+
+
+
+<h4 id="简化总结"><a href="#简化总结" class="headerlink" title="简化总结"></a>简化总结</h4><p>准备：服务端启动并通知BinderDriver，挂起等待请求</p>
+<p>——&gt;客户端写入请求（指令+数据）</p>
+<p>——&gt;BinderDriver查询服务并唤起服务端</p>
+<p>——&gt;服务端处理请求（指令 + 数据）</p>
+<p>——&gt;服务端组装响应（指令+数据）并写入响应</p>
+<p>——&gt;BinderDriver查询并唤起客户端</p>
+<p>——&gt;客户端读取响应</p>
+<p><img src="/binder_4.jpg" alt="binder_4"></p>
+<h1 id="AIDL-Android-Interface-Description-Language"><a href="#AIDL-Android-Interface-Description-Language" class="headerlink" title="AIDL(Android Interface Description Language)"></a>AIDL(Android Interface Description Language)</h1><p>构建一个BinderServer需要的工作：</p>
+<p>1、启动的时机</p>
+<p>2、需要提供一致的接口</p>
+<p>3、与Binder驱动进行互动</p>
+<p>4、外界如何访问到这个Server服务</p>
+<p>​        1、在SM中进行注册</p>
+<p>​        2、通过其他Server作为中介（匿名服务）</p>
+<p>解决以上问题的方案：AIDL</p>
+<p>AIDL会通过工具转为包含后会生成下面结构的java代码</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br><span class="line">94</span><br><span class="line">95</span><br><span class="line">96</span><br><span class="line">97</span><br><span class="line">98</span><br><span class="line">99</span><br><span class="line">100</span><br><span class="line">101</span><br><span class="line">102</span><br><span class="line">103</span><br><span class="line">104</span><br><span class="line">105</span><br><span class="line">106</span><br><span class="line">107</span><br><span class="line">108</span><br><span class="line">109</span><br><span class="line">110</span><br><span class="line">111</span><br><span class="line">112</span><br><span class="line">113</span><br><span class="line">114</span><br><span class="line">115</span><br><span class="line">116</span><br><span class="line">117</span><br><span class="line">118</span><br><span class="line">119</span><br><span class="line">120</span><br><span class="line">121</span><br><span class="line">122</span><br><span class="line">123</span><br><span class="line">124</span><br><span class="line">125</span><br><span class="line">126</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">package</span> com.example.taidl;</span><br><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">interface</span> <span class="title">ICalcAIDL</span> <span class="keyword">extends</span> <span class="title">android</span>.<span class="title">os</span>.<span class="title">IInterface</span></span></span><br><span class="line"><span class="class"></span>&#123;</span><br><span class="line"><span class="comment">/** Local-side IPC implementation stub class. */</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">abstract</span> <span class="class"><span class="keyword">class</span> <span class="title">Stub</span> <span class="keyword">extends</span> <span class="title">android</span>.<span class="title">os</span>.<span class="title">Binder</span> <span class="keyword">implements</span> <span class="title">com</span>.<span class="title">example</span>.<span class="title">taidl</span>.<span class="title">ICalcAIDL</span></span></span><br><span class="line"><span class="class"></span>&#123;</span><br><span class="line"><span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> java.lang.String DESCRIPTOR = <span class="string">"com.example.taidl.ICalcAIDL"</span>;</span><br><span class="line"><span class="comment">/** Construct the stub at attach it to the interface. */</span></span><br><span class="line"><span class="function"><span class="keyword">public</span> <span class="title">Stub</span><span class="params">()</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line"><span class="keyword">this</span>.attachInterface(<span class="keyword">this</span>, DESCRIPTOR);</span><br><span class="line">&#125;</span><br><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * Cast an IBinder object into an com.example.taidl.ICalcAIDL interface,</span></span><br><span class="line"><span class="comment"> * generating a proxy if needed.</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> com.example.taidl.<span class="function">ICalcAIDL <span class="title">asInterface</span><span class="params">(android.os.IBinder obj)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line"><span class="keyword">if</span> ((obj==<span class="keyword">null</span>)) &#123;</span><br><span class="line"><span class="keyword">return</span> <span class="keyword">null</span>;</span><br><span class="line">&#125;</span><br><span class="line">android.os.IInterface iin = obj.queryLocalInterface(DESCRIPTOR);</span><br><span class="line"><span class="keyword">if</span> (((iin!=<span class="keyword">null</span>)&amp;&amp;(iin <span class="keyword">instanceof</span> com.example.taidl.ICalcAIDL))) &#123;</span><br><span class="line"><span class="keyword">return</span> ((com.example.taidl.ICalcAIDL)iin);</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">return</span> <span class="keyword">new</span> com.example.taidl.ICalcAIDL.Stub.Proxy(obj);</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta">@Override</span> <span class="keyword">public</span> android.os.<span class="function">IBinder <span class="title">asBinder</span><span class="params">()</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line"><span class="keyword">return</span> <span class="keyword">this</span>;</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta">@Override</span> <span class="function"><span class="keyword">public</span> <span class="keyword">boolean</span> <span class="title">onTransact</span><span class="params">(<span class="keyword">int</span> code, android.os.Parcel data, android.os.Parcel reply, <span class="keyword">int</span> flags)</span> <span class="keyword">throws</span> android.os.RemoteException</span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line"><span class="keyword">switch</span> (code)</span><br><span class="line">&#123;</span><br><span class="line"><span class="keyword">case</span> INTERFACE_TRANSACTION:</span><br><span class="line">&#123;</span><br><span class="line">reply.writeString(DESCRIPTOR);</span><br><span class="line"><span class="keyword">return</span> <span class="keyword">true</span>;</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">case</span> TRANSACTION_add:</span><br><span class="line">&#123;</span><br><span class="line">data.enforceInterface(DESCRIPTOR);</span><br><span class="line"><span class="keyword">int</span> _arg0;</span><br><span class="line">_arg0 = data.readInt();</span><br><span class="line"><span class="keyword">int</span> _arg1;</span><br><span class="line">_arg1 = data.readInt();</span><br><span class="line"><span class="keyword">int</span> _result = <span class="keyword">this</span>.add(_arg0, _arg1);</span><br><span class="line">reply.writeNoException();</span><br><span class="line">reply.writeInt(_result);</span><br><span class="line"><span class="keyword">return</span> <span class="keyword">true</span>;</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">case</span> TRANSACTION_min:</span><br><span class="line">&#123;</span><br><span class="line">data.enforceInterface(DESCRIPTOR);</span><br><span class="line"><span class="keyword">int</span> _arg0;</span><br><span class="line">_arg0 = data.readInt();</span><br><span class="line"><span class="keyword">int</span> _arg1;</span><br><span class="line">_arg1 = data.readInt();</span><br><span class="line"><span class="keyword">int</span> _result = <span class="keyword">this</span>.min(_arg0, _arg1);</span><br><span class="line">reply.writeNoException();</span><br><span class="line">reply.writeInt(_result);</span><br><span class="line"><span class="keyword">return</span> <span class="keyword">true</span>;</span><br><span class="line">&#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">return</span> <span class="keyword">super</span>.onTransact(code, data, reply, flags);</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">private</span> <span class="keyword">static</span> <span class="class"><span class="keyword">class</span> <span class="title">Proxy</span> <span class="keyword">implements</span> <span class="title">com</span>.<span class="title">example</span>.<span class="title">taidl</span>.<span class="title">ICalcAIDL</span></span></span><br><span class="line"><span class="class"></span>&#123;</span><br><span class="line"><span class="keyword">private</span> android.os.IBinder mRemote;</span><br><span class="line">Proxy(android.os.IBinder remote)</span><br><span class="line">&#123;</span><br><span class="line">mRemote = remote;</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta">@Override</span> <span class="keyword">public</span> android.os.<span class="function">IBinder <span class="title">asBinder</span><span class="params">()</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line"><span class="keyword">return</span> mRemote;</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">public</span> java.lang.<span class="function">String <span class="title">getInterfaceDescriptor</span><span class="params">()</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line"><span class="keyword">return</span> DESCRIPTOR;</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta">@Override</span> <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">add</span><span class="params">(<span class="keyword">int</span> x, <span class="keyword">int</span> y)</span> <span class="keyword">throws</span> android.os.RemoteException</span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">android.os.Parcel _data = android.os.Parcel.obtain();</span><br><span class="line">android.os.Parcel _reply = android.os.Parcel.obtain();</span><br><span class="line"><span class="keyword">int</span> _result;</span><br><span class="line"><span class="keyword">try</span> &#123;</span><br><span class="line">_data.writeInterfaceToken(DESCRIPTOR);</span><br><span class="line">_data.writeInt(x);</span><br><span class="line">_data.writeInt(y);</span><br><span class="line">mRemote.transact(Stub.TRANSACTION_add, _data, _reply, <span class="number">0</span>);</span><br><span class="line">_reply.readException();</span><br><span class="line">_result = _reply.readInt();</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">finally</span> &#123;</span><br><span class="line">_reply.recycle();</span><br><span class="line">_data.recycle();</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">return</span> _result;</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta">@Override</span> <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">min</span><span class="params">(<span class="keyword">int</span> x, <span class="keyword">int</span> y)</span> <span class="keyword">throws</span> android.os.RemoteException</span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">android.os.Parcel _data = android.os.Parcel.obtain();</span><br><span class="line">android.os.Parcel _reply = android.os.Parcel.obtain();</span><br><span class="line"><span class="keyword">int</span> _result;</span><br><span class="line"><span class="keyword">try</span> &#123;</span><br><span class="line">_data.writeInterfaceToken(DESCRIPTOR);</span><br><span class="line">_data.writeInt(x);</span><br><span class="line">_data.writeInt(y);</span><br><span class="line">mRemote.transact(Stub.TRANSACTION_min, _data, _reply, <span class="number">0</span>);</span><br><span class="line">_reply.readException();</span><br><span class="line">_result = _reply.readInt();</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">finally</span> &#123;</span><br><span class="line">_reply.recycle();</span><br><span class="line">_data.recycle();</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">return</span> _result;</span><br><span class="line">&#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">static</span> <span class="keyword">final</span> <span class="keyword">int</span> TRANSACTION_add = (android.os.IBinder.FIRST_CALL_TRANSACTION + <span class="number">0</span>);</span><br><span class="line"><span class="keyword">static</span> <span class="keyword">final</span> <span class="keyword">int</span> TRANSACTION_min = (android.os.IBinder.FIRST_CALL_TRANSACTION + <span class="number">1</span>);</span><br><span class="line">&#125;</span><br><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">add</span><span class="params">(<span class="keyword">int</span> x, <span class="keyword">int</span> y)</span> <span class="keyword">throws</span> android.os.RemoteException</span>;</span><br><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">min</span><span class="params">(<span class="keyword">int</span> x, <span class="keyword">int</span> y)</span> <span class="keyword">throws</span> android.os.RemoteException</span>;</span><br></pre></td></tr></table></figure>
+
+<p>不难看出其中包含了Stub和Proxy类，相当于在ServiceManager中的XXXNative和XXXProxy</p>
+<h2 id="1、启动looper"><a href="#1、启动looper" class="headerlink" title="1、启动looper"></a>1、启动looper</h2><p>还记得我们的服务端在启动后进入了一个循环状态不断的通过ioctl从binder中取数据吧，那么其他服务是怎么完成这项功能的呢：</p>
+<p>我们要追溯到系统启动的时候System_init.cpp</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">extern</span> <span class="string">"C"</span> <span class="function"><span class="keyword">status_t</span> <span class="title">system_init</span><span class="params">()</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    ALOGI(<span class="string">"Entered system_init()"</span>);</span><br><span class="line"></span><br><span class="line">    <span class="function">sp&lt;ProcessState&gt; <span class="title">proc</span><span class="params">(ProcessState::self())</span></span>;</span><br><span class="line">		...</span><br><span class="line">    ProcessState::self()-&gt;startThreadPool();</span><br><span class="line">    IPCThreadState::self()-&gt;joinThreadPool();</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> NO_ERROR;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>通过上面的startThreadPool，joinThreadPool就可以完成累死binder_loop的功能</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">ProcessState::startThreadPool</span><span class="params">()</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    AutoMutex _l(mLock);</span><br><span class="line">    <span class="keyword">if</span> (!mThreadPoolStarted) &#123;</span><br><span class="line">        mThreadPoolStarted = <span class="literal">true</span>;</span><br><span class="line">        spawnPooledThread(<span class="literal">true</span>);<span class="comment">//产生一个线程池，注意传参为true</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">ProcessState::spawnPooledThread</span><span class="params">(<span class="keyword">bool</span> isMain)</span><span class="comment">//注意这里传参为true</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="keyword">if</span> (mThreadPoolStarted) &#123;</span><br><span class="line">        String8 name = makeBinderThreadName();<span class="comment">//为线程池取名</span></span><br><span class="line">        sp&lt;Thread&gt; t = <span class="keyword">new</span> PoolThread(isMain);<span class="comment">//生成线程池对象</span></span><br><span class="line">        t-&gt;<span class="built_in">run</span>(name.<span class="built_in">string</span>());<span class="comment">//运行</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Threads.cpp(/frameworks/base/libs/utils/Threads.cpp)</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">status_t</span> <span class="title">Thread::run</span><span class="params">(<span class="keyword">const</span> <span class="keyword">char</span>* name, <span class="keyword">int32_t</span> priority, <span class="keyword">size_t</span> <span class="built_in">stack</span>)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    ...</span><br><span class="line">    <span class="keyword">if</span> (mCanCallJava) &#123;</span><br><span class="line">        res = createThreadEtc(_threadLoop,</span><br><span class="line">                <span class="keyword">this</span>, name, priority, <span class="built_in">stack</span>, &amp;mThread);</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        res = androidCreateRawThreadEtc(_threadLoop,</span><br><span class="line">                <span class="keyword">this</span>, name, priority, <span class="built_in">stack</span>, &amp;mThread);</span><br><span class="line">    &#125;</span><br><span class="line">    ...</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">int</span> Thread::_threadLoop(<span class="keyword">void</span>* user)</span><br><span class="line">&#123;</span><br><span class="line">    ...</span><br><span class="line">            result = self-&gt;threadLoop();<span class="comment">//最终也会调用到joinThreadPool(true)</span></span><br><span class="line">    ...</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>最后我们来看看joinThreadPool都干了什么：</p>
+<p>我们不难发现，里面在进行一个循环</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">IPCThreadState::joinThreadPool</span><span class="params">(<span class="keyword">bool</span> isMain)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    ...</span><br><span class="line">    <span class="keyword">status_t</span> result;</span><br><span class="line">    <span class="keyword">do</span> &#123;</span><br><span class="line">        <span class="keyword">int32_t</span> cmd;</span><br><span class="line">       </span><br><span class="line">        ...</span><br><span class="line">        result = talkWithDriver();<span class="comment">//进行ioctl</span></span><br><span class="line">        <span class="keyword">if</span> (result &gt;= NO_ERROR) &#123;</span><br><span class="line">            <span class="keyword">size_t</span> IN = mIn.dataAvail();<span class="comment">//有没有可读数据</span></span><br><span class="line">            <span class="keyword">if</span> (IN &lt; <span class="keyword">sizeof</span>(<span class="keyword">int32_t</span>)) <span class="keyword">continue</span>;</span><br><span class="line">            cmd = mIn.readInt32();</span><br><span class="line"></span><br><span class="line">            result = executeCommand(cmd);<span class="comment">//执行cmd</span></span><br><span class="line">        &#125;</span><br><span class="line">        </span><br><span class="line">        ...</span><br><span class="line">        <span class="keyword">if</span>(result == TIMED_OUT &amp;&amp; !isMain) &#123;<span class="comment">//超时，而且不是主线程的Binder循环，就跳出</span></span><br><span class="line">            <span class="keyword">break</span>;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125; <span class="keyword">while</span> (result != -ECONNREFUSED &amp;&amp; result != -EBADF);</span><br><span class="line">    </span><br><span class="line">    mOut.writeInt32(BC_EXIT_LOOPER);<span class="comment">//告知Binder驱动退出循环</span></span><br><span class="line">    talkWithDriver(<span class="literal">false</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="2、SystemServer进程中ProcessState怎么判断该给哪个Server处理"><a href="#2、SystemServer进程中ProcessState怎么判断该给哪个Server处理" class="headerlink" title="2、SystemServer进程中ProcessState怎么判断该给哪个Server处理"></a>2、SystemServer进程中ProcessState怎么判断该给哪个Server处理</h2><p>ServiceManager进程中只有一个Server所以直接执行binder_prase就行了，但是在SystemServer进程中，存在多个服务：WindowManagerService，ActivityManagerService等，IPCThreadState怎么判断将Binder驱动的消息传给谁。</p>
+<p>来看看IPCThreadState的executeCommand函数</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">status_t</span> <span class="title">IPCThreadState::executeCommand</span><span class="params">(<span class="keyword">int32_t</span> cmd)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    BBinder* obj;</span><br><span class="line">    RefBase::weakref_type* refs;</span><br><span class="line">    <span class="keyword">status_t</span> result = NO_ERROR;</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">switch</span> (cmd) &#123;</span><br><span class="line">        ...</span><br><span class="line">    <span class="keyword">case</span> BR_TRANSACTION:</span><br><span class="line">        &#123;</span><br><span class="line">            binder_transaction_data tr;</span><br><span class="line">            result = mIn.<span class="built_in">read</span>(&amp;tr, <span class="keyword">sizeof</span>(tr));<span class="comment">//读取业务请求</span></span><br><span class="line">            ...</span><br><span class="line">            </span><br><span class="line">            Parcel <span class="built_in">buffer</span>;</span><br><span class="line">            <span class="built_in">buffer</span>.ipcSetDataReference(</span><br><span class="line">                <span class="keyword">reinterpret_cast</span>&lt;<span class="keyword">const</span> <span class="keyword">uint8_t</span>*&gt;(tr.data.ptr.<span class="built_in">buffer</span>),</span><br><span class="line">                tr.data_size,</span><br><span class="line">                <span class="keyword">reinterpret_cast</span>&lt;<span class="keyword">const</span> <span class="keyword">size_t</span>*&gt;(tr.data.ptr.offsets),</span><br><span class="line">                tr.offsets_size/<span class="keyword">sizeof</span>(<span class="keyword">size_t</span>), freeBuffer, <span class="keyword">this</span>);</span><br><span class="line">         		<span class="comment">//填充成Parcel数据</span></span><br><span class="line">            ...</span><br><span class="line">            Parcel reply;</span><br><span class="line">            ...</span><br><span class="line">            <span class="keyword">if</span> (tr.target.ptr) &#123;<span class="comment">//如果target指定了目标对象</span></span><br><span class="line">                <span class="function">sp&lt;BBinder&gt; <span class="title">b</span><span class="params">((BBinder*)tr.cookie)</span></span>;<span class="comment">//强制转化为BBinder</span></span><br><span class="line">                <span class="keyword">const</span> <span class="keyword">status_t</span> error = b-&gt;transact(tr.code, <span class="built_in">buffer</span>, &amp;reply, tr.flags);</span><br><span class="line">                <span class="keyword">if</span> (error &lt; NO_ERROR) reply.setError(error);</span><br><span class="line"></span><br><span class="line">            &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">                <span class="keyword">const</span> <span class="keyword">status_t</span> error = the_context_object-&gt;transact(tr.code, <span class="built_in">buffer</span>, &amp;reply, tr.flags);</span><br><span class="line">                <span class="keyword">if</span> (error &lt; NO_ERROR) reply.setError(error);</span><br><span class="line">            &#125;</span><br><span class="line">            ...</span><br><span class="line">        <span class="keyword">break</span>;</span><br><span class="line">    ...</span><br><span class="line">      <span class="keyword">return</span> result;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>当tr.target.ptr不为null是将其转外为BBinder执行transact，</p>
+<p>看来BBinder就是Server与IPCThreadState沟通的桥梁，而BBinder又是怎么生成的呢</p>
+<p>我们知道Stub是继承自 Binder的，而Binder的构造函数中会调用init()方法，该方法为JNI调用，对应的本地方法：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">void</span> <span class="title">android_os_Binder_init</span><span class="params">(JNIEnv* env, jobject obj)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    JavaBBinderHolder* jbh = <span class="keyword">new</span> JavaBBinderHolder();</span><br><span class="line">    <span class="keyword">if</span> (jbh == <span class="literal">NULL</span>) &#123;</span><br><span class="line">        jniThrowException(env, <span class="string">"java/lang/OutOfMemoryError"</span>, <span class="literal">NULL</span>);</span><br><span class="line">        <span class="keyword">return</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    ALOGV(<span class="string">"Java Binder %p: acquiring first ref on holder %p"</span>, obj, jbh);</span><br><span class="line">    jbh-&gt;incStrong((<span class="keyword">void</span>*)android_os_Binder_init);</span><br><span class="line">    env-&gt;SetLongField(obj, gBinderOffsets.mObject, (jlong)jbh);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>在这里SetLongField执行的是将JavaBBinderHolder设置给Binder.mObject中，</p>
+<p>当其他服务（例如：WindowManagerServer）被add到SM中时，会在组装Parcel数据时将service经过一些转化，转化为一个JavaBBinder而这个JavaBBinder实际上就是BBinder，然后将其强指针写入到要发送的Parcel中</p>
+<p>​    在Binder驱动的设计中，只要用户携带一个Binder对象”路过“它，它就会将其记录下来，当前进程proc中的所有Binder对象都会被作为node节点缓存下来，在携带有JavaBBinder的Parcel对象被传输是，就会查询当前进程的缓存树，查看是否有该节点，如果没有就会新建一个node，添加到树上，因此属于当前proc的Binder对象都是有记录的，在客户端发起请求是，会携带有所请求节点的引用。</p>
+<p>重新回到上面的 IPCThreadState::executeCommand</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">sp&lt;BBinder&gt; <span class="title">b</span><span class="params">((BBinder*)tr.cookie)</span></span>;<span class="comment">//强制转化为BBinder</span></span><br><span class="line"><span class="keyword">const</span> <span class="keyword">status_t</span> error = b-&gt;transact(tr.code, <span class="built_in">buffer</span>, &amp;reply, tr.flags);</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">status_t</span> <span class="title">BBinder::transact</span><span class="params">(</span></span></span><br><span class="line"><span class="function"><span class="params">    <span class="keyword">uint32_t</span> code, <span class="keyword">const</span> Parcel&amp; data, Parcel* reply, <span class="keyword">uint32_t</span> flags)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    data.setDataPosition(<span class="number">0</span>);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">status_t</span> err = NO_ERROR;</span><br><span class="line">    <span class="keyword">switch</span> (code) &#123;</span><br><span class="line">        <span class="keyword">case</span> PING_TRANSACTION:</span><br><span class="line">            reply-&gt;writeInt32(pingBinder());</span><br><span class="line">            <span class="keyword">break</span>;</span><br><span class="line">        <span class="keyword">default</span>:</span><br><span class="line">            err = onTransact(code, data, reply, flags);</span><br><span class="line">            <span class="keyword">break</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (reply != <span class="literal">NULL</span>) &#123;</span><br><span class="line">        reply-&gt;setDataPosition(<span class="number">0</span>);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> err;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>而BBinder的实际上是JavaBBinder所以调用JavaBBinder的重写函数</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">virtual</span> <span class="keyword">status_t</span> <span class="title">onTransact</span><span class="params">(</span></span></span><br><span class="line"><span class="function"><span class="params">        <span class="keyword">uint32_t</span> code, <span class="keyword">const</span> Parcel&amp; data, Parcel* reply, <span class="keyword">uint32_t</span> flags = <span class="number">0</span>)</span></span></span><br><span class="line"><span class="function">    </span>&#123;</span><br><span class="line">        JNIEnv* env = javavm_to_jnienv(mVM);</span><br><span class="line"></span><br><span class="line">        IPCThreadState* thread_state = IPCThreadState::self();</span><br><span class="line">        <span class="keyword">const</span> <span class="keyword">int32_t</span> strict_policy_before = thread_state-&gt;getStrictModePolicy();</span><br><span class="line"></span><br><span class="line">        <span class="comment">//printf("Transact from %p to Java code sending: ", this);</span></span><br><span class="line">        <span class="comment">//data.print();</span></span><br><span class="line">        <span class="comment">//printf("\n");</span></span><br><span class="line">        jboolean res = env-&gt;CallBooleanMethod(mObject, gBinderOffsets.mExecTransact,</span><br><span class="line">            code, <span class="keyword">reinterpret_cast</span>&lt;jlong&gt;(&amp;data), <span class="keyword">reinterpret_cast</span>&lt;jlong&gt;(reply), flags);</span><br><span class="line">				...</span><br><span class="line">    &#125;</span><br></pre></td></tr></table></figure>
+
+<p>CallBooleanMethod这个函数是调用java层Binder的某个接口函数来把用户的请求发送出去，这个接口是Binder.execTransact已经预先储存在了gBinderOffsets.mExecTransact中</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">private</span> <span class="keyword">boolean</span> <span class="title">execTransact</span><span class="params">(<span class="keyword">int</span> code, <span class="keyword">long</span> dataObj, <span class="keyword">long</span> replyObj,</span></span></span><br><span class="line"><span class="function"><span class="params">            <span class="keyword">int</span> flags)</span> </span>&#123;</span><br><span class="line">        BinderCallsStats binderCallsStats = BinderCallsStats.getInstance();</span><br><span class="line">        BinderCallsStats.CallSession callSession = binderCallsStats.callStarted(<span class="keyword">this</span>, code);</span><br><span class="line">        Parcel data = Parcel.obtain(dataObj);</span><br><span class="line">        Parcel reply = Parcel.obtain(replyObj);</span><br><span class="line">        <span class="comment">// theoretically, we should call transact, which will call onTransact,</span></span><br><span class="line">        <span class="comment">// but all that does is rewind it, and we just got these from an IPC,</span></span><br><span class="line">        <span class="comment">// so we'll just call it directly.</span></span><br><span class="line">        <span class="keyword">boolean</span> res;</span><br><span class="line">        <span class="comment">// Log any exceptions as warnings, don't silently suppress them.</span></span><br><span class="line">        <span class="comment">// If the call was FLAG_ONEWAY then these exceptions disappear into the ether.</span></span><br><span class="line">        <span class="keyword">final</span> <span class="keyword">boolean</span> tracingEnabled = Binder.isTracingEnabled();</span><br><span class="line">        <span class="keyword">try</span> &#123;</span><br><span class="line">            <span class="keyword">if</span> (tracingEnabled) &#123;</span><br><span class="line">                Trace.traceBegin(Trace.TRACE_TAG_ALWAYS, getClass().getName() + <span class="string">":"</span> + code);</span><br><span class="line">            &#125;</span><br><span class="line">            res = onTransact(code, data, reply, flags);</span><br><span class="line">        &#125; <span class="keyword">catch</span> (RemoteException|RuntimeException e) &#123;</span><br><span class="line">           ...</span><br><span class="line"></span><br><span class="line">        <span class="keyword">return</span> res;</span><br><span class="line">    &#125;</span><br></pre></td></tr></table></figure>
+
+<p>最终执行到了接口中的onTransact方法，这个方法由Stub实现其具体功能，在使用AIDL时，我们之所以不用关心onTransact中的处理是因为AIDL已经帮我们做了处理，无缝衔接到了具体方法上，所以我们只需要实现方法就可以了。</p>
+<h1 id="匿名服务"><a href="#匿名服务" class="headerlink" title="匿名服务"></a>匿名服务</h1><p>不在ServiceManager中进行注册的服务，只能通过一个实名服务作为中介获取到匿名服务的代理对象，然后操作匿名服务</p>
+<p>典型的例子在WindowManagerService中，我们在希望与WindowManagerService进行交互时，是不能直接调用WindowManagerService中的方法的，因为WindowManagerService是系统中的重要服务，他需要与系统中的其他模块进行合作，所以不会把所有方法都暴露给我们，我们只有通过获取到他内部的Session对象，从而间接的通过与Session对象交互来达到目的，Session对象继承自IWindowSession.Stub，且其在new的时候会在构造方法中持有WindowManagerService的引用，当Session的引用作为Parcel被传输给客户端是，因为Binder驱动的路过Binder对象即绑定机制，会在Binder驱动服务端进程中生成对应的node节点，这样在传输给Client时，我们获得到的其实就是Session对象的代理对象，这样就可以直接跨进程访问Session，从而间接的访问WindowManagerService</p>
+
+      
+      <!-- reward -->
+      
+      <div id="reward-btn">
+        Donate
+      </div>
+      
+    </div>
+    
+    
+      <!-- copyright -->
+      
+        <div class="declare">
+          <ul class="post-copyright">
+            <li>
+              <i class="ri-copyright-line"></i>
+              <strong>Copyright： </strong>
+              Copyright is owned by the author. For commercial reprints, please contact the author for authorization. For non-commercial reprints, please indicate the source.
+            </li>
+          </ul>
+        </div>
+        
+    <footer class="article-footer">
+      
+          
+<div class="share-btn">
+      <span class="share-sns share-outer">
+        <i class="ri-share-forward-line"></i>
+        分享
+      </span>
+      <div class="share-wrap">
+        <i class="arrow"></i>
+        <div class="share-icons">
+          
+          <a class="weibo share-sns" href="javascript:;" data-type="weibo">
+            <i class="ri-weibo-fill"></i>
+          </a>
+          <a class="weixin share-sns wxFab" href="javascript:;" data-type="weixin">
+            <i class="ri-wechat-fill"></i>
+          </a>
+          <a class="qq share-sns" href="javascript:;" data-type="qq">
+            <i class="ri-qq-fill"></i>
+          </a>
+          <a class="douban share-sns" href="javascript:;" data-type="douban">
+            <i class="ri-douban-line"></i>
+          </a>
+          <!-- <a class="qzone share-sns" href="javascript:;" data-type="qzone">
+            <i class="icon icon-qzone"></i>
+          </a> -->
+          
+          <a class="facebook share-sns" href="javascript:;" data-type="facebook">
+            <i class="ri-facebook-circle-fill"></i>
+          </a>
+          <a class="twitter share-sns" href="javascript:;" data-type="twitter">
+            <i class="ri-twitter-fill"></i>
+          </a>
+          <a class="google share-sns" href="javascript:;" data-type="google">
+            <i class="ri-google-fill"></i>
+          </a>
+        </div>
+      </div>
+</div>
+
+<div class="wx-share-modal">
+    <a class="modal-close" href="javascript:;"><i class="ri-close-circle-line"></i></a>
+    <p>扫一扫，分享到微信</p>
+    <div class="wx-qrcode">
+      <img src="//api.qrserver.com/v1/create-qr-code/?size=150x150&data=http://yoursite.com/2020/05/20/Binder/" alt="微信分享二维码">
+    </div>
+</div>
+
+<div id="share-mask"></div>
+      
+      
+
+    </footer>
+
+  </div>
+
+  
+  
+  <nav class="article-nav">
+    
+      <a href="/2020/05/23/AMS%20(ActivityManagerService)/" class="article-nav-link">
+        <strong class="article-nav-caption">上一篇</strong>
+        <div class="article-nav-title">
+          
+            AMS (ActivityManagerService)
+          
+        </div>
+      </a>
+    
+    
+  </nav>
+
+
+  
+
+  
+  
+<!-- valine评论 -->
+<div id="vcomments-box">
+    <div id="vcomments">
+    </div>
+</div>
+<script src="//cdn1.lncld.net/static/js/3.0.4/av-min.js"></script>
+<script src='https://cdn.jsdelivr.net/npm/valine@1.3.10/dist/Valine.min.js'></script>
+<script>
+    new Valine({
+        el: '#vcomments',
+        app_id: '',
+        app_key: '',
+        path: window.location.pathname,
+        notify: false,
+        verify: false,
+        avatar: 'monsterid',
+        placeholder: '给我的文章加点评论吧~',
+        recordIP: true
+    });
+    const infoEle = document.querySelector('#vcomments .info');
+    if (infoEle && infoEle.childNodes && infoEle.childNodes.length > 0) {
+        infoEle.childNodes.forEach(function (item) {
+            item.parentNode.removeChild(item);
+        });
+    }
+</script>
+<style>
+    #vcomments-box {
+        padding: 5px 30px;
+    }
+
+    @media screen and (max-width: 800px) {
+        #vcomments-box {
+            padding: 5px 0px;
+        }
+    }
+
+    #vcomments-box #vcomments {
+        background-color: #fff;
+    }
+
+    .v .vlist .vcard .vh {
+        padding-right: 20px;
+    }
+
+    .v .vlist .vcard {
+        padding-left: 10px;
+    }
+</style>
+
+  
+
+  
+  
+  
+
+</article>
+</section>
+      <footer class="footer">
+  <div class="outer">
+    <ul>
+      <li>
+        Copyrights &copy;
+        2015-2020
+        <i class="ri-heart-fill heart_icon"></i> John Doe
+      </li>
+    </ul>
+    <ul>
+      <li>
+        
+        
+        
+        Powered by <a href="https://hexo.io" target="_blank">Hexo</a>
+        <span class="division">|</span>
+        Theme - <a href="https://github.com/Shen-Yu/hexo-theme-ayer" target="_blank">Ayer</a>
+        
+      </li>
+    </ul>
+    <ul>
+      <li>
+        
+        
+        <span>
+  <span><i class="ri-user-3-fill"></i>Visitors:<span id="busuanzi_value_site_uv"></span></s>
+  <span class="division">|</span>
+  <span><i class="ri-eye-fill"></i>Views:<span id="busuanzi_value_page_pv"></span></span>
+</span>
+        
+      </li>
+    </ul>
+    <ul>
+      
+    </ul>
+    <ul>
+      <li>
+        <!-- cnzz统计 -->
+        
+        <script type="text/javascript" src='https://s9.cnzz.com/z_stat.php?id=1278069914&amp;web_id=1278069914'></script>
+        
+      </li>
+    </ul>
+  </div>
+</footer>
+      <div class="float_btns">
+        <div class="totop" id="totop">
+  <i class="ri-arrow-up-line"></i>
+</div>
+
+<div class="todark" id="todark">
+  <i class="ri-moon-line"></i>
+</div>
+
+      </div>
+    </main>
+    <aside class="sidebar on">
+      <button class="navbar-toggle"></button>
+<nav class="navbar">
+  
+  <div class="logo">
+    <a href="/"><img src="/images/ayer-side.svg" alt="hansnowqiang"></a>
+  </div>
+  
+  <ul class="nav nav-main">
+    
+    <li class="nav-item">
+      <a class="nav-item-link" href="/">主页</a>
+    </li>
+    
+    <li class="nav-item">
+      <a class="nav-item-link" href="/archives">归档</a>
+    </li>
+    
+    <li class="nav-item">
+      <a class="nav-item-link" href="/categories">分类</a>
+    </li>
+    
+    <li class="nav-item">
+      <a class="nav-item-link" href="/tags">标签</a>
+    </li>
+    
+    <li class="nav-item">
+      <a class="nav-item-link" href="/tags/%E6%97%85%E8%A1%8C/">旅行</a>
+    </li>
+    
+    <li class="nav-item">
+      <a class="nav-item-link" href="http://shenyu-vip.lofter.com" target="_blank" rel="noopener">摄影</a>
+    </li>
+    
+    <li class="nav-item">
+      <a class="nav-item-link" href="/2019/about">关于我</a>
+    </li>
+    
+  </ul>
+</nav>
+<nav class="navbar navbar-bottom">
+  <ul class="nav">
+    <li class="nav-item">
+      
+      <a class="nav-item-link nav-item-search"  title="Search">
+        <i class="ri-search-line"></i>
+      </a>
+      
+      
+      <a class="nav-item-link" target="_blank" href="/atom.xml" title="RSS Feed">
+        <i class="ri-rss-line"></i>
+      </a>
+      
+    </li>
+  </ul>
+</nav>
+<div class="search-form-wrap">
+  <div class="local-search local-search-plugin">
+  <input type="search" id="local-search-input" class="local-search-input" placeholder="Search...">
+  <div id="local-search-result" class="local-search-result"></div>
+</div>
+</div>
+    </aside>
+    <script>
+      if (window.matchMedia("(max-width: 768px)").matches) {
+        document.querySelector('.content').classList.remove('on');
+        document.querySelector('.sidebar').classList.remove('on');
+      }
+    </script>
+    <div id="mask"></div>
+
+<!-- #reward -->
+<div id="reward">
+  <span class="close"><i class="ri-close-line"></i></span>
+  <p class="reward-p"><i class="ri-cup-line"></i>请我喝杯咖啡吧~</p>
+  <div class="reward-box">
+    
+    <div class="reward-item">
+      <img class="reward-img" src="https://cdn.jsdelivr.net/gh/Shen-Yu/cdn/img/alipay.jpg">
+      <span class="reward-type">支付宝</span>
+    </div>
+    
+    
+    <div class="reward-item">
+      <img class="reward-img" src="https://cdn.jsdelivr.net/gh/Shen-Yu/cdn/img/wechat.jpg">
+      <span class="reward-type">微信</span>
+    </div>
+    
+  </div>
+</div>
+    
+<script src="/js/jquery-2.0.3.min.js"></script>
+
+
+<script src="/js/lazyload.min.js"></script>
+
+<!-- Subtitle -->
+
+<script>
+  try {
+    var typed = new Typed("#subtitle", {
+      strings: ['面朝大海，春暖花开', '愿你一生努力，一生被爱', '想要的都拥有，得不到的都释怀'],
+      startDelay: 0,
+      typeSpeed: 200,
+      loop: true,
+      backSpeed: 100,
+      showCursor: true
+    });
+  } catch (err) {
+    console.log(err)
+  }
+</script>
+
+<!-- Tocbot -->
+
+
+<script src="/js/tocbot.min.js"></script>
+
+<script>
+  tocbot.init({
+    tocSelector: '.tocbot',
+    contentSelector: '.article-entry',
+    headingSelector: 'h1, h2, h3, h4, h5, h6',
+    hasInnerContainers: true,
+    scrollSmooth: true,
+    scrollContainer: 'main',
+    positionFixedSelector: '.tocbot',
+    positionFixedClass: 'is-position-fixed',
+    fixedSidebarOffset: 'auto'
+  });
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery-modal@0.9.2/jquery.modal.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jquery-modal@0.9.2/jquery.modal.min.css">
+<script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.7.0/dist/js/jquery.justifiedGallery.min.js"></script>
+
+<script src="/dist/main.js"></script>
+
+<!-- ImageViewer -->
+
+<!-- Root element of PhotoSwipe. Must have class pswp. -->
+<div class="pswp" tabindex="-1" role="dialog" aria-hidden="true">
+
+    <!-- Background of PhotoSwipe. 
+         It's a separate element as animating opacity is faster than rgba(). -->
+    <div class="pswp__bg"></div>
+
+    <!-- Slides wrapper with overflow:hidden. -->
+    <div class="pswp__scroll-wrap">
+
+        <!-- Container that holds slides. 
+            PhotoSwipe keeps only 3 of them in the DOM to save memory.
+            Don't modify these 3 pswp__item elements, data is added later on. -->
+        <div class="pswp__container">
+            <div class="pswp__item"></div>
+            <div class="pswp__item"></div>
+            <div class="pswp__item"></div>
+        </div>
+
+        <!-- Default (PhotoSwipeUI_Default) interface on top of sliding area. Can be changed. -->
+        <div class="pswp__ui pswp__ui--hidden">
+
+            <div class="pswp__top-bar">
+
+                <!--  Controls are self-explanatory. Order can be changed. -->
+
+                <div class="pswp__counter"></div>
+
+                <button class="pswp__button pswp__button--close" title="Close (Esc)"></button>
+
+                <button class="pswp__button pswp__button--share" style="display:none" title="Share"></button>
+
+                <button class="pswp__button pswp__button--fs" title="Toggle fullscreen"></button>
+
+                <button class="pswp__button pswp__button--zoom" title="Zoom in/out"></button>
+
+                <!-- Preloader demo http://codepen.io/dimsemenov/pen/yyBWoR -->
+                <!-- element will get class pswp__preloader--active when preloader is running -->
+                <div class="pswp__preloader">
+                    <div class="pswp__preloader__icn">
+                        <div class="pswp__preloader__cut">
+                            <div class="pswp__preloader__donut"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pswp__share-modal pswp__share-modal--hidden pswp__single-tap">
+                <div class="pswp__share-tooltip"></div>
+            </div>
+
+            <button class="pswp__button pswp__button--arrow--left" title="Previous (arrow left)">
+            </button>
+
+            <button class="pswp__button pswp__button--arrow--right" title="Next (arrow right)">
+            </button>
+
+            <div class="pswp__caption">
+                <div class="pswp__caption__center"></div>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/default-skin/default-skin.min.css">
+<script src="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe-ui-default.min.js"></script>
+
+<script>
+    function viewer_init() {
+        let pswpElement = document.querySelectorAll('.pswp')[0];
+        let $imgArr = document.querySelectorAll(('.article-entry img:not(.reward-img)'))
+
+        $imgArr.forEach(($em, i) => {
+            $em.onclick = () => {
+                // slider展开状态
+                // todo: 这样不好，后面改成状态
+                if (document.querySelector('.left-col.show')) return
+                let items = []
+                $imgArr.forEach(($em2, i2) => {
+                    let img = $em2.getAttribute('data-idx', i2)
+                    let src = $em2.getAttribute('data-target') || $em2.getAttribute('src')
+                    let title = $em2.getAttribute('alt')
+                    // 获得原图尺寸
+                    const image = new Image()
+                    image.src = src
+                    items.push({
+                        src: src,
+                        w: image.width || $em2.width,
+                        h: image.height || $em2.height,
+                        title: title
+                    })
+                })
+                var gallery = new PhotoSwipe(pswpElement, PhotoSwipeUI_Default, items, {
+                    index: parseInt(i)
+                });
+                gallery.init()
+            }
+        })
+    }
+    viewer_init()
+</script>
+
+<!-- MathJax -->
+
+<!-- Katex -->
+
+<!-- busuanzi  -->
+
+
+<script src="/js/busuanzi-2.3.pure.min.js"></script>
+
+
+<!-- ClickLove -->
+
+<!-- ClickBoom1 -->
+
+<!-- ClickBoom2 -->
+
+<!-- CodeCopy -->
+
+
+<link rel="stylesheet" href="/css/clipboard.css">
+
+<script src="https://cdn.jsdelivr.net/npm/clipboard@2/dist/clipboard.min.js"></script>
+<script>
+  function wait(callback, seconds) {
+    var timelag = null;
+    timelag = window.setTimeout(callback, seconds);
+  }
+  !function (e, t, a) {
+    var initCopyCode = function(){
+      var copyHtml = '';
+      copyHtml += '<button class="btn-copy" data-clipboard-snippet="">';
+      copyHtml += '<i class="ri-file-copy-2-line"></i><span>COPY</span>';
+      copyHtml += '</button>';
+      $(".highlight .code pre").before(copyHtml);
+      $(".article pre code").before(copyHtml);
+      var clipboard = new ClipboardJS('.btn-copy', {
+        target: function(trigger) {
+          return trigger.nextElementSibling;
+        }
+      });
+      clipboard.on('success', function(e) {
+        let $btn = $(e.trigger);
+        $btn.addClass('copied');
+        let $icon = $($btn.find('i'));
+        $icon.removeClass('ri-file-copy-2-line');
+        $icon.addClass('ri-checkbox-circle-line');
+        let $span = $($btn.find('span'));
+        $span[0].innerText = 'COPIED';
+        
+        wait(function () { // 等待两秒钟后恢复
+          $icon.removeClass('ri-checkbox-circle-line');
+          $icon.addClass('ri-file-copy-2-line');
+          $span[0].innerText = 'COPY';
+        }, 2000);
+      });
+      clipboard.on('error', function(e) {
+        e.clearSelection();
+        let $btn = $(e.trigger);
+        $btn.addClass('copy-failed');
+        let $icon = $($btn.find('i'));
+        $icon.removeClass('ri-file-copy-2-line');
+        $icon.addClass('ri-time-line');
+        let $span = $($btn.find('span'));
+        $span[0].innerText = 'COPY FAILED';
+        
+        wait(function () { // 等待两秒钟后恢复
+          $icon.removeClass('ri-time-line');
+          $icon.addClass('ri-file-copy-2-line');
+          $span[0].innerText = 'COPY';
+        }, 2000);
+      });
+    }
+    initCopyCode();
+  }(window, document);
+</script>
+
+
+<!-- CanvasBackground -->
+
+
+<script src="/js/dz.js"></script>
+
+
+
+    
+    
+    
+      
+  </div>
+</body>
+
+</html>
